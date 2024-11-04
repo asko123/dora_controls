@@ -1,30 +1,26 @@
 import PyPDF2
 import re
+import spacy
 from collections import defaultdict
 
 class DORARequirementExtractor:
     def __init__(self, pdf_path):
         self.pdf_path = pdf_path
         self.text = self._extract_and_clean_text()
+        self.nlp = spacy.load("en_core_web_sm")
         
     def _extract_and_clean_text(self):
-        """Extract text from PDF document and clean it."""
-        print("Extracting text from PDF...")  # Debug print
+        """Extract and clean text from PDF document."""
         with open(self.pdf_path, 'rb') as file:
             reader = PyPDF2.PdfReader(file)
             text = ""
             for page in reader.pages:
                 if page.extract_text():
                     text += page.extract_text() + "\n"
-            
-            # Clean the extracted text
-            text = self._clean_text(text)
-            print(f"Extracted {len(text)} characters")  # Debug print
-            return text
+        return self._clean_text(text)
 
     def _clean_text(self, text):
-        """Clean the extracted text by fixing common issues."""
-        # Fix common broken words
+        """Clean the extracted text."""
         common_fixes = {
             r'arrang\s*ements': 'arrangements',
             r'require\s*ments': 'requirements',
@@ -50,136 +46,161 @@ class DORARequirementExtractor:
             r'resil\s*ience': 'resilience',
             r'third\s*-\s*party': 'third-party'
         }
-        
-        # Apply fixes
         for pattern, replacement in common_fixes.items():
             text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
-        
         return text.strip()
 
-    def _extract_articles(self):
-        """Extract individual articles from the text."""
-        print("Extracting articles...")  # Debug print
-        # Updated pattern to better match DORA document structure
-        article_pattern = r"Article\s+(\d+)\s*\n([^\n]+)\n(.*?)(?=Article\s+\d+|\Z)"
-        articles = re.finditer(article_pattern, self.text, re.DOTALL)
-        extracted_articles = [(match.group(1), match.group(2).strip(), match.group(3).strip()) 
-                            for match in articles]
-        print(f"Found {len(extracted_articles)} articles")  # Debug print
-        return extracted_articles
-
-    def _identify_requirements(self, text):
-        """Identify requirements from legal text."""
-        requirement_patterns = [
-            r"shall\s+([^\.]+\.[^\.]+)",
-            r"must\s+([^\.]+\.[^\.]+)",
-            r"required\s+to\s+([^\.]+\.[^\.]+)",
-            r"ensure\s+that\s+([^\.]+\.[^\.]+)",
-            r"implement\s+([^\.]+\.[^\.]+)",
-            r"establish\s+([^\.]+\.[^\.]+)",
-            r"maintain\s+([^\.]+\.[^\.]+)",
-            r"provide\s+([^\.]+\.[^\.]+)",
-            r"develop\s+([^\.]+\.[^\.]+)",
-            r"set\s+up\s+([^\.]+\.[^\.]+)"
-        ]
+    def _extract_technical_requirements(self, legal_text):
+        """
+        Extract technical requirements using NLP analysis.
+        """
+        doc = self.nlp(legal_text)
         
-        requirements = []
-        for pattern in requirement_patterns:
-            matches = re.finditer(pattern, text, re.IGNORECASE)
-            for match in matches:
-                requirement = match.group(1).strip()
-                if len(requirement) > 10:  # Filter out very short matches
-                    requirements.append(requirement)
+        # Initialize requirement components
+        actions = []
+        systems = []
+        specifications = []
+        timeframes = []
         
-        return requirements
+        # Extract key components using dependency parsing
+        for token in doc:
+            if token.dep_ in ['ROOT', 'VERB'] and token.pos_ == 'VERB':
+                actions.append(token.text)
+            if token.dep_ == 'dobj' and token.pos_ == 'NOUN':
+                systems.append(token.text)
+            if token.dep_ == 'pobj' and token.pos_ == 'NOUN':
+                specifications.append(token.text)
+            if token.ent_type_ in ['TIME', 'DATE']:
+                timeframes.append(token.text)
 
-    def _generate_technical_controls(self, requirement):
-        """Generate technical controls based on requirement text."""
-        controls = defaultdict(list)
+        return {
+            'actions': list(set(actions)),
+            'systems': list(set(systems)),
+            'specifications': list(set(specifications)),
+            'timeframes': list(set(timeframes))
+        }
+
+    def _generate_technical_controls(self, requirement_components):
+        """Generate specific technical controls based on requirement components."""
+        technical_controls = {
+            'Implementation Requirements': [],
+            'Technical Specifications': [],
+            'Monitoring Requirements': [],
+            'Documentation Requirements': []
+        }
+
+        # Map actions to technical implementations
+        action_mappings = {
+            'implement': [
+                'Deploy automated solution with following specifications:',
+                'Establish implementation timeline and milestones',
+                'Configure system according to security baseline'
+            ],
+            'monitor': [
+                'Set up real-time monitoring system',
+                'Configure alerting thresholds',
+                'Implement automated reporting'
+            ],
+            'report': [
+                'Develop automated reporting mechanism',
+                'Configure dashboard with key metrics',
+                'Implement incident tracking system'
+            ],
+            'assess': [
+                'Deploy risk assessment framework',
+                'Implement continuous evaluation system',
+                'Configure automated testing tools'
+            ]
+        }
+
+        # Generate specific technical requirements based on components
+        for action in requirement_components['actions']:
+            if action.lower() in action_mappings:
+                technical_controls['Implementation Requirements'].extend(action_mappings[action.lower()])
+
+        # Add system-specific controls
+        for system in requirement_components['systems']:
+            technical_controls['Technical Specifications'].append(f"System Component: {system}")
+            technical_controls['Technical Specifications'].extend([
+                f"- Implement access control mechanisms",
+                f"- Configure monitoring and logging",
+                f"- Deploy backup and recovery procedures",
+                f"- Establish security baseline"
+            ])
+
+        # Add monitoring requirements
+        technical_controls['Monitoring Requirements'].extend([
+            "Configure continuous monitoring:",
+            "- Set up automated data collection",
+            "- Implement real-time alerting",
+            "- Deploy performance metrics tracking",
+            "- Establish compliance monitoring"
+        ])
+
+        # Add documentation requirements
+        technical_controls['Documentation Requirements'].extend([
+            "Required Documentation:",
+            "- System architecture diagrams",
+            "- Configuration specifications",
+            "- Security controls documentation",
+            "- Operational procedures"
+        ])
+
+        return technical_controls
+
+    def process_article(self, article_text):
+        """Process a single article and generate technical specifications."""
+        # Extract technical components using NLP
+        components = self._extract_technical_requirements(article_text)
         
-        # Risk Management Controls
-        if any(word in requirement.lower() for word in ['risk', 'assess', 'evaluate']):
-            controls['Risk Management'].extend([
-                'Implement automated risk assessment tools',
-                'Deploy continuous monitoring systems',
-                'Establish risk metrics and KRIs',
-                'Develop risk reporting dashboards'
-            ])
-
-        # Security Controls
-        if any(word in requirement.lower() for word in ['security', 'protect', 'safeguard']):
-            controls['Security Controls'].extend([
-                'Deploy SIEM solution',
-                'Implement IDS/IPS systems',
-                'Enable security logging and monitoring',
-                'Configure security baseline controls'
-            ])
-
-        # Incident Management
-        if any(word in requirement.lower() for word in ['incident', 'breach', 'response']):
-            controls['Incident Management'].extend([
-                'Deploy incident management platform',
-                'Implement automated incident response',
-                'Configure alert management system',
-                'Establish incident tracking and metrics'
-            ])
-
-        # If no specific controls were identified, add general controls
-        if not controls:
-            controls['General Controls'].extend([
-                'Implement automated compliance monitoring',
-                'Deploy relevant control systems',
-                'Configure monitoring and alerting',
-                'Establish measurement and reporting'
-            ])
-
-        return dict(controls)
+        # Generate technical controls
+        controls = self._generate_technical_controls(components)
+        
+        return controls
 
     def process_document(self):
-        """Process the entire document and extract requirements."""
-        articles = self._extract_articles()
+        """Process the entire document and generate technical specifications."""
+        # Pattern to identify articles and their content
+        article_pattern = r"Article\s+(\d+)\s*([^\n]+)\n(.*?)(?=Article\s+\d+|\Z)"
+        articles = re.finditer(article_pattern, self.text, re.DOTALL)
+        
         output = []
-
-        for article_num, article_title, article_text in articles:
-            print(f"Processing Article {article_num}")  # Debug print
-            output.append(f"\nArticle {article_num}: {article_title}")
+        
+        for article in articles:
+            article_num = article.group(1)
+            article_title = article.group(2).strip()
+            article_content = article.group(3).strip()
             
-            requirements = self._identify_requirements(article_text)
-            if requirements:
-                for req in requirements:
-                    output.append(f"\nLegal Requirement:")
-                    output.append(f"{req}")
-                    output.append("\nTechnical Implementation:")
-                    
-                    controls = self._generate_technical_controls(req)
-                    for control_type, control_list in controls.items():
-                        output.append(f"\n{control_type}:")
-                        for control in control_list:
-                            output.append(f"- {control}")
-                    output.append("\n" + "-"*80)
-            else:
-                output.append("\nNo specific technical requirements identified.")
-                output.append("\n" + "-"*80)
-
+            output.append(f"\nArticle {article_num}: {article_title}")
+            output.append("\nLegal Requirement:")
+            output.append(article_content)
+            
+            # Process the article content
+            technical_specs = self.process_article(article_content)
+            
+            output.append("\nTechnical Implementation Specifications:")
+            for category, controls in technical_specs.items():
+                output.append(f"\n{category}:")
+                for control in controls:
+                    output.append(f"- {control}")
+            
+            output.append("\n" + "="*80 + "\n")
+        
         return "\n".join(output)
 
 def main():
     pdf_path = '/Users/Tawfiq/Desktop/gpt-pilot-backup-0-2-7-73a8c223/workspace/WorkShop/CELEX_32022R2554_EN_TXT.pdf'
-    output_file = 'dora_requirements_detailed.txt'
+    output_file = 'dora_technical_specifications.txt'
     
-    print("Starting DORA document processing...")
+    print("Processing DORA document...")
     try:
         extractor = DORARequirementExtractor(pdf_path)
         content = extractor.process_document()
         
-        if not content.strip():
-            print("Warning: No content generated!")
-            return
-            
         with open(output_file, 'w', encoding='utf-8') as f:
             f.write(content)
-            
-        print(f"Requirements have been written to {output_file}")
+        
+        print(f"Technical specifications have been written to {output_file}")
         
     except Exception as e:
         print(f"Error processing document: {str(e)}")
