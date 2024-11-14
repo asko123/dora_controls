@@ -168,7 +168,7 @@ class DORAComplianceAnalyzer:
 
 def main():
     # Initialize analyzer with DORA document
-    dora_path = '/Users/Tawfiq/Desktop/gpt-pilot-backup-0-2-7-73a8c223/workspace/WorkShop/CELEX_32022R2554_EN_TXT.pdf'
+    dora_path = 'CELEX_32022R2554_EN_TXT.pdf'
     analyzer = DORAComplianceAnalyzer(dora_path)
     
     # Extract technical standards
