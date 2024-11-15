@@ -361,19 +361,49 @@ class DORAComplianceAnalyzer:
         return cleaned_text.strip()
 
     def _identify_policy_area(self, text: str) -> str:
-        """Identify the policy area based on content analysis."""
-        doc = self.nlp(text.lower())
-        area_scores = defaultdict(float)
-        
-        for area, keywords in self.policy_areas.items():
-            for keyword in keywords:
-                keyword_doc = self.nlp(keyword)
-                # Calculate similarity with text
-                similarity = max(keyword_doc.similarity(sent) for sent in doc.sents)
-                area_scores[area] += similarity
-        
-        # Return the area with highest score
-        return max(area_scores.items(), key=lambda x: x[1])[0] if area_scores else 'general'
+        """Identify the policy area based on content analysis with improved handling."""
+        try:
+            doc = self.nlp(text.lower())
+            area_scores = defaultdict(float)
+            
+            # Get non-empty sentences
+            sentences = [sent for sent in doc.sents if len(sent) > 0]
+            
+            for area, keywords in self.policy_areas.items():
+                area_score = 0.0
+                keyword_matches = 0
+                
+                for keyword in keywords:
+                    keyword_doc = self.nlp(keyword)
+                    
+                    # Skip empty documents
+                    if not keyword_doc.vector_norm:
+                        continue
+                        
+                    # Compare with each sentence
+                    for sent in sentences:
+                        if not sent.vector_norm:
+                            continue
+                        try:
+                            similarity = keyword_doc.similarity(sent)
+                            if similarity > 0.6:  # Threshold for keyword match
+                                area_score += similarity
+                                keyword_matches += 1
+                        except Exception as e:
+                            continue
+                
+                # Calculate final score considering both similarity and matches
+                if keyword_matches > 0:
+                    area_scores[area] = area_score / keyword_matches
+            
+            # Return the area with highest score or 'general' if no good matches
+            if area_scores:
+                return max(area_scores.items(), key=lambda x: x[1])[0]
+            return 'general'
+            
+        except Exception as e:
+            print(f"Error in policy area identification: {str(e)}")
+            return 'general'
 
     def extract_technical_standards(self):
         """Extract RTS and ITS requirements with enhanced precision."""
@@ -503,21 +533,55 @@ class DORAComplianceAnalyzer:
         policy_area = self._identify_policy_area(policy_text)
         print(f"Identified policy area for {policy_name}: {policy_area}")
         
+        def calculate_similarity(text1, text2):
+            """Calculate similarity between two texts with proper error handling."""
+            try:
+                # Process both texts
+                doc1 = self.nlp(text1)
+                doc2 = self.nlp(text2)
+                
+                # Check if either document is empty
+                if not doc1 or not doc2:
+                    return 0.0
+                    
+                # Get non-empty sentences
+                sents1 = [sent for sent in doc1.sents if len(sent) > 0]
+                sents2 = [sent for sent in doc2.sents if len(sent) > 0]
+                
+                if not sents1 or not sents2:
+                    return 0.0
+                
+                # Calculate similarity using sentence-level comparison
+                similarities = []
+                for sent1 in sents1:
+                    for sent2 in sents2:
+                        # Check if sentences have vectors
+                        if sent1.vector_norm and sent2.vector_norm:
+                            similarities.append(sent1.similarity(sent2))
+                
+                # Return max similarity if we found any, otherwise 0
+                return max(similarities) if similarities else 0.0
+                
+            except Exception as e:
+                print(f"Error calculating similarity: {str(e)}")
+                return 0.0
+
         # Process only relevant requirements for this policy area
         for article_num, requirements in self.rts_requirements.items():
             for req in requirements:
                 if req['policy_area'] == policy_area:
-                    requirement_doc = self.nlp(req['requirement_text'])
-                    policy_doc = self.nlp(policy_text)
+                    # Get the full requirement text
+                    requirement_text = req.get('full_context', req['requirement_text'])
                     
-                    # Calculate similarity score
-                    similarity_score = requirement_doc.similarity(policy_doc)
+                    # Calculate similarity with proper error handling
+                    similarity_score = calculate_similarity(requirement_text, policy_text)
                     
                     if similarity_score > 0.5:  # Adjusted threshold
                         self.policy_coverage[policy_name].append({
                             'article_num': article_num,
                             'requirement_type': 'RTS',
                             'requirement_text': req['requirement_text'],
+                            'full_context': req.get('full_context', ''),
                             'covered': similarity_score > 0.7,
                             'similarity_score': similarity_score,
                             'policy_area': policy_area
@@ -527,15 +591,18 @@ class DORAComplianceAnalyzer:
         for article_num, requirements in self.its_requirements.items():
             for req in requirements:
                 if req['policy_area'] == policy_area:
-                    requirement_doc = self.nlp(req['requirement_text'])
-                    policy_doc = self.nlp(policy_text)
-                    similarity_score = requirement_doc.similarity(policy_doc)
+                    # Get the full requirement text
+                    requirement_text = req.get('full_context', req['requirement_text'])
+                    
+                    # Calculate similarity with proper error handling
+                    similarity_score = calculate_similarity(requirement_text, policy_text)
                     
                     if similarity_score > 0.5:  # Adjusted threshold
                         self.policy_coverage[policy_name].append({
                             'article_num': article_num,
                             'requirement_type': 'ITS',
                             'requirement_text': req['requirement_text'],
+                            'full_context': req.get('full_context', ''),
                             'covered': similarity_score > 0.7,
                             'similarity_score': similarity_score,
                             'policy_area': policy_area
