@@ -582,7 +582,7 @@ class DORAComplianceAnalyzer:
 
 def main():
     # Initialize analyzer with DORA document
-    dora_path = '/Users/Tawfiq/Desktop/gpt-pilot-backup-0-2-7-73a8c223/workspace/WorkShop/CELEX_32022R2554_EN_TXT.pdf'
+    dora_path = 'CELEX_32022R2554_EN_TXT.pdf'
     analyzer = DORAComplianceAnalyzer(dora_path)
     
     # Extract technical standards
@@ -590,7 +590,7 @@ def main():
     analyzer.extract_technical_standards()
     
     # Define the folder containing policy documents
-    policy_folder = '/Users/Tawfiq/Desktop/gpt-pilot-backup-0-2-7-73a8c223/workspace/WorkShop/policies'
+    policy_folder = 'policies'
     
     # Get all PDF files from the folder
     print(f"Scanning for policy documents in: {policy_folder}")
