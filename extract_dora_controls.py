@@ -5,6 +5,7 @@ import re
 from typing import Tuple, List, Dict
 from collections import defaultdict
 from pathlib import Path
+import difflib
 
 class DORAComplianceAnalyzer:
     def __init__(self, dora_pdf_path):
@@ -647,53 +648,107 @@ class DORAComplianceAnalyzer:
 
     def analyze_policy_document(self, policy_pdf_path: str, policy_name: str):
         """Analyze a policy document and identify gaps."""
+        if not policy_pdf_path or not policy_name:
+            raise ValueError("Policy path and name must be provided")
+        
+        if not Path(policy_pdf_path).exists():
+            raise FileNotFoundError(f"Policy file not found: {policy_pdf_path}")
+
         print(f"\nAnalyzing policy document: {policy_name}")
         
-        # Extract text and tables from policy document using pdfplumber
         try:
             policy_text = []
             tables_data = []
             current_table = None
             table_header = None
+            table_page_start = None
             
+            # Validate PDF file before processing
+            if not self._is_valid_pdf(policy_pdf_path):
+                raise ValueError(f"Invalid or corrupted PDF file: {policy_pdf_path}")
+
             with pdfplumber.open(policy_pdf_path) as pdf:
+                total_pages = len(pdf.pages)
+                print(f"Total pages in document: {total_pages}")
+                
                 for page_num, page in enumerate(pdf.pages, 1):
-                    print(f"Processing page {page_num}/{len(pdf.pages)}")
+                    print(f"Processing page {page_num}/{total_pages}")
                     
-                    # Extract tables from the page
-                    tables = page.extract_tables()
-                    
-                    if tables:
-                        for table in tables:
-                            # Check if this is a continuation of a previous table
-                            if current_table is not None:
-                                if len(table[0]) == len(current_table[0]):  # Same number of columns
-                                    current_table.extend(table[1:])  # Add rows without header
+                    try:
+                        # Extract tables from the page
+                        tables = page.extract_tables()
+                        
+                        if tables:
+                            for table_idx, table in enumerate(tables):
+                                # Validate table structure
+                                if not self._is_valid_table(table):
+                                    print(f"Skipping invalid table {table_idx + 1} on page {page_num}")
                                     continue
+                                    
+                                if not table or not any(row for row in table if any(cell for cell in row)):
+                                    continue  # Skip empty tables
+                                    
+                                # Process table continuation
+                                if current_table is not None:
+                                    is_continuation = self._check_table_continuation(
+                                        current_table, table, page_num
+                                    )
+                                    
+                                    if is_continuation:
+                                        print(f"Detected table continuation on page {page_num}")
+                                        current_table.extend(table[1:])  # Add rows without header
+                                        continue
+                                    else:
+                                        # Process the completed table
+                                        self._process_completed_table(
+                                            current_table, 
+                                            tables_data, 
+                                            start_page=table_page_start,
+                                            end_page=page_num-1
+                                        )
+                                        current_table = table
+                                        table_header = table[0]
+                                        table_page_start = page_num
                                 else:
-                                    # Process the completed table
-                                    self._process_completed_table(current_table, tables_data)
                                     current_table = table
                                     table_header = table[0]
-                            else:
-                                current_table = table
-                                table_header = table[0]
-                    elif current_table is not None:
-                        # Process the completed table
-                        self._process_completed_table(current_table, tables_data)
-                        current_table = None
-                        table_header = None
+                                    table_page_start = page_num
+                        
+                        elif current_table is not None:
+                            # Process the completed table
+                            self._process_completed_table(
+                                current_table,
+                                tables_data,
+                                start_page=table_page_start,
+                                end_page=page_num-1
+                            )
+                            current_table = None
+                            table_header = None
+                            table_page_start = None
+                        
+                        # Extract and clean text
+                        text = page.extract_text(x_tolerance=2, y_tolerance=2)
+                        if text:
+                            cleaned_text = self._remove_table_content_from_text_enhanced(text, tables)
+                            if cleaned_text.strip():
+                                policy_text.append(cleaned_text)
                     
-                    # Extract text, excluding table areas
-                    text = page.extract_text(x_tolerance=2, y_tolerance=2)
-                    if text:
-                        # Remove table content from text to avoid duplication
-                        text = self._remove_table_content_from_text(text, tables)
-                        policy_text.append(text)
+                    except Exception as e:
+                        print(f"Error processing page {page_num}: {str(e)}")
+                        continue  # Continue with next page
+                
+                # Process any remaining table
+                if current_table is not None:
+                    self._process_completed_table(
+                        current_table,
+                        tables_data,
+                        start_page=table_page_start,
+                        end_page=total_pages
+                    )
             
-            # Process any remaining table
-            if current_table is not None:
-                self._process_completed_table(current_table, tables_data)
+            # Validate and combine extracted content
+            if not policy_text and not tables_data:
+                raise ValueError("No content extracted from the document")
             
             # Combine text and formatted table data
             combined_text = "\n".join(policy_text)
@@ -703,90 +758,141 @@ class DORAComplianceAnalyzer:
             
             policy_text = self._clean_text(combined_text)
             
-            # Initialize coverage tracking
-            coverage_results = []
-            
-            # Track all requirements for gap analysis
-            all_requirements = []
-            
-            # Collect all RTS requirements
-            for article_num, requirements in self.rts_requirements.items():
-                for req in requirements:
-                    all_requirements.append({
-                        'article_num': article_num,
-                        'requirement_type': 'RTS',
-                        'requirement_text': req['requirement_text'],
-                        'full_context': req.get('full_context', ''),
-                        'policy_area': req['policy_area']
-                    })
-            
-            # Collect all ITS requirements
-            for article_num, requirements in self.its_requirements.items():
-                for req in requirements:
-                    all_requirements.append({
-                        'article_num': article_num,
-                        'requirement_type': 'ITS',
-                        'requirement_text': req['requirement_text'],
-                        'full_context': req.get('full_context', ''),
-                        'policy_area': req['policy_area']
-                    })
-            
-            print(f"Found {len(all_requirements)} total requirements to analyze")
-            
-            # Analyze each requirement against both text and table content
-            for req in all_requirements:
-                requirement_text = req['full_context'] or req['requirement_text']
-                
-                try:
-                    # Calculate similarity with main text
-                    text_similarity = self._calculate_similarity(requirement_text, policy_text)
-                    
-                    # Calculate similarity with table content
-                    table_similarity = 0.0
-                    if tables_data:
-                        table_text = self._format_tables_data(tables_data)
-                        table_similarity = self._calculate_similarity(requirement_text, table_text)
-                    
-                    # Use the higher similarity score
-                    similarity_score = max(text_similarity, table_similarity)
-                    
-                    coverage_results.append({
-                        'article_num': req['article_num'],
-                        'requirement_type': req['requirement_type'],
-                        'requirement_text': req['requirement_text'],
-                        'full_context': req.get('full_context', ''),
-                        'covered': similarity_score > 0.7,
-                        'similarity_score': similarity_score,
-                        'policy_area': req['policy_area']
-                    })
-                    
-                except Exception as e:
-                    print(f"Error analyzing requirement from Article {req['article_num']}: {str(e)}")
-                    coverage_results.append({
-                        'article_num': req['article_num'],
-                        'requirement_type': req['requirement_type'],
-                        'requirement_text': req['requirement_text'],
-                        'full_context': req.get('full_context', ''),
-                        'covered': False,
-                        'similarity_score': 0.0,
-                        'policy_area': req['policy_area'],
-                        'error': str(e)
-                    })
+            # Analyze requirements
+            coverage_results = self._analyze_requirements(policy_text, tables_data)
             
             # Store results
             self.policy_coverage[policy_name] = coverage_results
             
-            # Print summary
-            covered = len([r for r in coverage_results if r['covered']])
-            gaps = len([r for r in coverage_results if not r['covered']])
-            print(f"\nAnalysis Summary for {policy_name}:")
-            print(f"Total Requirements: {len(coverage_results)}")
-            print(f"Covered Requirements: {covered}")
-            print(f"Gaps Identified: {gaps}")
+            # Generate summary
+            self._print_analysis_summary(policy_name, coverage_results)
             
         except Exception as e:
             print(f"Error processing policy document {policy_name}: {str(e)}")
             self.policy_coverage[policy_name] = []
+            raise
+
+    def _is_valid_pdf(self, pdf_path: str) -> bool:
+        """Validate PDF file."""
+        try:
+            with pdfplumber.open(pdf_path) as pdf:
+                return len(pdf.pages) > 0
+        except:
+            return False
+
+    def _is_valid_table(self, table: List[List[str]]) -> bool:
+        """Validate table structure."""
+        if not table or not isinstance(table, list):
+            return False
+        
+        # Check if all rows have the same number of columns
+        if not all(isinstance(row, list) for row in table):
+            return False
+        
+        num_cols = len(table[0])
+        return all(len(row) == num_cols for row in table)
+
+    def _check_table_continuation(self, current_table: List[List[str]], 
+                                    new_table: List[List[str]], page_num: int) -> bool:
+        """Check if new table is a continuation of current table."""
+        try:
+            # Exact column match
+            if len(new_table[0]) == len(current_table[0]):
+                return True
+            
+            # Similar column count with header similarity
+            if abs(len(new_table[0]) - len(current_table[0])) <= 1:
+                header_similarity = self._calculate_header_similarity(
+                    current_table[0], new_table[0]
+                )
+                return header_similarity > 0.8
+            
+            return False
+        except Exception as e:
+            print(f"Error checking table continuation on page {page_num}: {str(e)}")
+            return False
+
+    def _analyze_requirements(self, policy_text: str, tables_data: List[Dict]) -> List[Dict]:
+        """Analyze requirements against policy content."""
+        coverage_results = []
+        all_requirements = []
+        
+        # Collect all requirements
+        for article_num, requirements in self.rts_requirements.items():
+            for req in requirements:
+                all_requirements.append({
+                    'article_num': article_num,
+                    'requirement_type': 'RTS',
+                    'requirement_text': req['requirement_text'],
+                    'full_context': req.get('full_context', ''),
+                    'policy_area': req['policy_area']
+                })
+        
+        for article_num, requirements in self.its_requirements.items():
+            for req in requirements:
+                all_requirements.append({
+                    'article_num': article_num,
+                    'requirement_type': 'ITS',
+                    'requirement_text': req['requirement_text'],
+                    'full_context': req.get('full_context', ''),
+                    'policy_area': req['policy_area']
+                })
+        
+        print(f"Analyzing {len(all_requirements)} requirements...")
+        
+        for req in all_requirements:
+            try:
+                requirement_text = req['full_context'] or req['requirement_text']
+                
+                # Calculate similarity scores
+                text_similarity = self._calculate_similarity(requirement_text, policy_text)
+                
+                table_similarity = 0.0
+                if tables_data:
+                    table_text = self._format_tables_data(tables_data)
+                    table_similarity = self._calculate_similarity(requirement_text, table_text)
+                
+                similarity_score = max(text_similarity, table_similarity)
+                
+                coverage_results.append({
+                    'article_num': req['article_num'],
+                    'requirement_type': req['requirement_type'],
+                    'requirement_text': req['requirement_text'],
+                    'full_context': req.get('full_context', ''),
+                    'covered': similarity_score > 0.7,
+                    'similarity_score': similarity_score,
+                    'policy_area': req['policy_area']
+                })
+                
+            except Exception as e:
+                print(f"Error analyzing requirement from Article {req['article_num']}: {str(e)}")
+                coverage_results.append({
+                    'article_num': req['article_num'],
+                    'requirement_type': req['requirement_type'],
+                    'requirement_text': req['requirement_text'],
+                    'full_context': req.get('full_context', ''),
+                    'covered': False,
+                    'similarity_score': 0.0,
+                    'policy_area': req['policy_area'],
+                    'error': str(e)
+                })
+        
+        return coverage_results
+
+    def _print_analysis_summary(self, policy_name: str, coverage_results: List[Dict]):
+        """Print analysis summary."""
+        covered = len([r for r in coverage_results if r['covered']])
+        gaps = len([r for r in coverage_results if not r['covered']])
+        total = len(coverage_results)
+        
+        print("\nAnalysis Summary for", policy_name)
+        print("=" * 40)
+        print(f"Total Requirements: {total}")
+        print(f"Covered Requirements: {covered}")
+        print(f"Gaps Identified: {gaps}")
+        if total > 0:
+            coverage_percentage = (covered / total) * 100
+            print(f"Coverage Percentage: {coverage_percentage:.1f}%")
 
     def _calculate_similarity(self, text1: str, text2: str) -> float:
         """Calculate similarity between two texts with improved handling."""
@@ -821,6 +927,106 @@ class DORAComplianceAnalyzer:
         except Exception as e:
             print(f"Error in similarity calculation: {str(e)}")
             return 0.0
+
+    def _calculate_header_similarity(self, header1, header2):
+        """Calculate similarity between two table headers."""
+        if not header1 or not header2:
+            return 0.0
+        
+        # Clean and normalize headers
+        clean_header1 = [str(cell).strip().lower() for cell in header1 if cell]
+        clean_header2 = [str(cell).strip().lower() for cell in header2 if cell]
+        
+        # Calculate similarity using fuzzy matching
+        matches = 0
+        total = max(len(clean_header1), len(clean_header2))
+        
+        for h1 in clean_header1:
+            for h2 in clean_header2:
+                # Use similarity ratio from difflib
+                similarity = difflib.SequenceMatcher(None, h1, h2).ratio()
+                if similarity > 0.8:  # High similarity threshold
+                    matches += 1
+                    break
+        
+        return matches / total if total > 0 else 0.0
+
+    def _remove_table_content_from_text_enhanced(self, text: str, tables: List[List[List[str]]]) -> str:
+        """Enhanced removal of table content from extracted text."""
+        if not tables:
+            return text
+        
+        # Create a set of table content with variations
+        table_content = set()
+        for table in tables:
+            for row in table:
+                for cell in row:
+                    if not isinstance(cell, str):
+                        cell = str(cell)
+                    cell = cell.strip()
+                    if cell:
+                        # Add original cell content
+                        table_content.add(cell)
+                        # Add lowercase version
+                        table_content.add(cell.lower())
+                        # Add without extra spaces
+                        table_content.add(' '.join(cell.split()))
+        
+        # Split text into lines and process each line
+        lines = text.split('\n')
+        cleaned_lines = []
+        
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+            
+            # Check if line contains table content
+            should_keep = True
+            for content in table_content:
+                # Use fuzzy matching for more accurate detection
+                if content and len(content) > 3:  # Ignore very short content
+                    if difflib.SequenceMatcher(None, line.lower(), content.lower()).ratio() > 0.8:
+                        should_keep = False
+                        break
+            
+            if should_keep:
+                cleaned_lines.append(line)
+        
+        return '\n'.join(cleaned_lines)
+
+    def _process_completed_table(self, table: List[List[str]], tables_data: List[Dict], 
+                                       start_page: int, end_page: int) -> None:
+        """Process a completed table with page information."""
+        try:
+            # Remove empty rows and clean cell content
+            cleaned_table = [
+                [self._clean_cell_content(cell) for cell in row]
+                for row in table
+                if any(cell.strip() for cell in row)
+            ]
+            
+            if not cleaned_table:
+                return
+            
+            # Create DataFrame
+            df = pd.DataFrame(cleaned_table[1:], columns=cleaned_table[0])
+            
+            # Store table data with metadata
+            tables_data.append({
+                'data': df,
+                'header': cleaned_table[0],
+                'num_rows': len(df),
+                'num_cols': len(df.columns),
+                'start_page': start_page,
+                'end_page': end_page
+            })
+            
+            print(f"Processed table: {len(df)} rows, {len(df.columns)} columns, "
+                  f"pages {start_page}-{end_page}")
+        
+        except Exception as e:
+            print(f"Error processing table: {str(e)}")
 
     def generate_gap_analysis_report(self):
         """Generate a detailed gap analysis report."""
