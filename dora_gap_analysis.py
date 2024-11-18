@@ -1084,6 +1084,16 @@ class DORAComplianceAnalyzer:
         output.insert(5, f"Overall Coverage: {((total_requirements - total_gaps) / total_requirements * 100):.1f}%\n")
         
         return "\n".join(output)
+    
+    def _clean_text(self, text: str) -> str:
+        """Clean and normalize the extracted text."""
+        try:
+            # Remove extra whitespace and newlines
+            cleaned_text = ' '.join(text.split())
+            return cleaned_text
+        except Exception as e:
+            print(f"Error cleaning text: {str(e)}")
+            return text
 
 def main():
     # Initialize analyzer with DORA document
