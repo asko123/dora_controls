@@ -859,7 +859,7 @@ class DORAComplianceAnalyzer:
                     'requirement_type': req['requirement_type'],
                     'requirement_text': req['requirement_text'],
                     'full_context': req.get('full_context', ''),
-                    'covered': similarity_score > 0.7,
+                    'covered': similarity_score > 0.5,  # Lowered threshold from 0.7 to 0.5
                     'similarity_score': similarity_score,
                     'policy_area': req['policy_area']
                 })
@@ -895,34 +895,56 @@ class DORAComplianceAnalyzer:
             print(f"Coverage Percentage: {coverage_percentage:.1f}%")
 
     def _calculate_similarity(self, text1: str, text2: str) -> float:
-        """Calculate similarity between two texts with improved handling."""
+        """Calculate similarity between two texts using both cosine and semantic similarity."""
         try:
-            # Process both texts
-            doc1 = self.nlp(text1[:25000])  # Limit text length to avoid memory issues
+            # Process both texts with spaCy
+            doc1 = self.nlp(text1[:25000])  # Limit text length
             doc2 = self.nlp(text2[:25000])
             
             # Get non-empty sentences
-            sents1 = [sent for sent in doc1.sents if len(sent) > 0]
-            sents2 = [sent for sent in doc2.sents if len(sent) > 0]
+            sents1 = [sent.text for sent in doc1.sents if len(sent) > 0]
+            sents2 = [sent.text for sent in doc2.sents if len(sent) > 0]
             
             if not sents1 or not sents2:
                 return 0.0
             
-            # Calculate similarity using sentence-level comparison
-            max_similarity = 0.0
-            for sent1 in sents1:
+            # Calculate cosine similarity
+            cosine_sim = 0.0
+            for sent1 in doc1.sents:
                 if not sent1.vector_norm:
                     continue
-                for sent2 in sents2:
+                for sent2 in doc2.sents:
                     if not sent2.vector_norm:
                         continue
                     try:
-                        similarity = sent1.similarity(sent2)
-                        max_similarity = max(max_similarity, similarity)
+                        sim = sent1.similarity(sent2)
+                        cosine_sim = max(cosine_sim, sim)
                     except Exception:
                         continue
             
-            return max_similarity
+            # Calculate semantic similarity using word overlap
+            def get_words(text):
+                return set(word.lower() for word in text.split() if len(word) > 2)
+            
+            words1 = set()
+            words2 = set()
+            for sent in sents1:
+                words1.update(get_words(sent))
+            for sent in sents2:
+                words2.update(get_words(sent))
+            
+            if not words1 or not words2:
+                return cosine_sim
+            
+            # Jaccard similarity for word overlap
+            intersection = len(words1.intersection(words2))
+            union = len(words1.union(words2))
+            semantic_sim = intersection / union if union > 0 else 0
+            
+            # Combine similarities (weighted average)
+            combined_sim = (0.7 * cosine_sim) + (0.3 * semantic_sim)
+            
+            return combined_sim
             
         except Exception as e:
             print(f"Error in similarity calculation: {str(e)}")
@@ -1081,7 +1103,11 @@ class DORAComplianceAnalyzer:
         output.insert(2, f"\nOverall Statistics:")
         output.insert(3, f"Total Requirements Analyzed: {total_requirements}")
         output.insert(4, f"Total Gaps Identified: {total_gaps}")
-        output.insert(5, f"Overall Coverage: {((total_requirements - total_gaps) / total_requirements * 100):.1f}%\n")
+        if total_requirements > 0:
+            coverage = ((total_requirements - total_gaps) / total_requirements * 100)
+            output.insert(5, f"Overall Coverage: {coverage:.1f}%\n")
+        else:
+            output.insert(5, "Overall Coverage: N/A (no requirements analyzed)\n")
         
         return "\n".join(output)
     
