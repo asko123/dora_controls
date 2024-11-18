@@ -1,10 +1,11 @@
-import PyPDF2
-import re
+import pdfplumber
+import pandas as pd
 import spacy
+import re
+from typing import Tuple, List, Dict
 from collections import defaultdict
 from pathlib import Path
-import logging
-from typing import Dict, List, Set
+import difflib
 
 class DORAComplianceAnalyzer:
     def __init__(self, dora_pdf_path):
@@ -334,31 +335,159 @@ class DORAComplianceAnalyzer:
         }
 
     def _extract_and_clean_text(self) -> str:
-        """Extract and clean text from PDF document."""
-        with open(self.dora_pdf_path, 'rb') as file:
-            reader = PyPDF2.PdfReader(file)
-            text = ""
-            for page in reader.pages:
-                if page.extract_text():
-                    text += page.extract_text() + "\n"
-        return self._clean_text(text)
+        """Extract and clean text and tables from PDF document."""
+        print("Extracting content from PDF...")
+        
+        full_text = []
+        tables_data = []
+        current_table = None
+        table_header = None
+        
+        try:
+            with pdfplumber.open(self.dora_pdf_path) as pdf:
+                for page_num, page in enumerate(pdf.pages, 1):
+                    print(f"Processing page {page_num}/{len(pdf.pages)}")
+                    
+                    # Extract tables from the page
+                    tables = page.extract_tables()
+                    
+                    if tables:
+                        for table in tables:
+                            # Check if this is a continuation of a previous table
+                            if current_table is not None:
+                                if len(table[0]) == len(current_table[0]):  # Same number of columns
+                                    current_table.extend(table[1:])  # Add rows without header
+                                    continue
+                                else:
+                                    # Process the completed table
+                                    self._process_completed_table(current_table, tables_data)
+                                    current_table = table
+                                    table_header = table[0]
+                            else:
+                                current_table = table
+                                table_header = table[0]
+                    elif current_table is not None:
+                        # Process the completed table
+                        self._process_completed_table(current_table, tables_data)
+                        current_table = None
+                        table_header = None
+                    
+                    # Extract text, excluding table areas
+                    text = page.extract_text(x_tolerance=2, y_tolerance=2)
+                    if text:
+                        # Remove table content from text to avoid duplication
+                        text = self._remove_table_content_from_text(text, tables)
+                        full_text.append(text)
+                
+                # Process any remaining table
+                if current_table is not None:
+                    self._process_completed_table(current_table, tables_data)
+            
+            # Combine text and formatted table data
+            combined_text = "\n".join(full_text)
+            if tables_data:
+                combined_text += "\n\nExtracted Tables:\n"
+                combined_text += self._format_tables_data(tables_data)
+            
+            return self._clean_text(combined_text)
+        
+        except Exception as e:
+            print(f"Error extracting content from PDF: {str(e)}")
+            return ""
 
-    def _clean_text(self, text: str) -> str:
-        """Clean the extracted text with enhanced cleaning rules."""
-        # Enhanced cleaning patterns
-        cleaning_patterns = {
-            r'regulat\s*ory\s+technical\s+standards?': 'RTS',
-            r'implement\s*ing\s+technical\s+standards?': 'ITS',
-            r'tech\s*nical\s+standard': 'technical standard',
-            r'\s+': ' ',  # Replace multiple spaces with single space
-            r'\n\s*\n': '\n\n',  # Normalize line breaks
+    def _process_completed_table(self, table: List[List[str]], tables_data: List[Dict]) -> None:
+        """Process a completed table and add it to tables_data."""
+        try:
+            # Remove empty rows and clean cell content
+            cleaned_table = [
+                [self._clean_cell_content(cell) for cell in row]
+                for row in table
+                if any(cell.strip() for cell in row)
+            ]
+            
+            if not cleaned_table:
+                return
+            
+            # Create DataFrame
+            df = pd.DataFrame(cleaned_table[1:], columns=cleaned_table[0])
+            
+            # Store table data with metadata
+            tables_data.append({
+                'data': df,
+                'header': cleaned_table[0],
+                'num_rows': len(df),
+                'num_cols': len(df.columns)
+            })
+        
+        except Exception as e:
+            print(f"Error processing table: {str(e)}")
+
+    def _clean_cell_content(self, cell: str) -> str:
+        """Clean individual cell content."""
+        if not isinstance(cell, str):
+            return str(cell)
+        
+        # Remove extra whitespace and newlines
+        cleaned = ' '.join(cell.split())
+        return cleaned.strip()
+
+    def _remove_table_content_from_text(self, text: str, tables: List[List[List[str]]]) -> str:
+        """Remove table content from extracted text to avoid duplication."""
+        if not tables:
+            return text
+        
+        # Create a set of table content for faster lookup
+        table_content = set()
+        for table in tables:
+            for row in table:
+                for cell in row:
+                    if isinstance(cell, str):
+                        table_content.add(cell.strip())
+        
+        # Split text into lines and remove those matching table content
+        lines = text.split('\n')
+        cleaned_lines = []
+        for line in lines:
+            line = line.strip()
+            # Keep line if it's not in table content
+            if line and not any(table_text in line for table_text in table_content):
+                cleaned_lines.append(line)
+        
+        return '\n'.join(cleaned_lines)
+
+    def _format_tables_data(self, tables_data: List[Dict]) -> str:
+        """Format extracted tables data into readable text."""
+        formatted_text = []
+        
+        for i, table in enumerate(tables_data, 1):
+            formatted_text.append(f"\nTable {i}:")
+            formatted_text.append("-" * 40)
+            
+            # Convert DataFrame to string with proper formatting
+            table_str = table['data'].to_string(index=False)
+            formatted_text.append(table_str)
+            formatted_text.append("")  # Empty line after table
+        
+        return "\n".join(formatted_text)
+
+    def _identify_table_type(self, table_data: pd.DataFrame) -> str:
+        """Identify the type of table based on its content and structure."""
+        header_text = ' '.join(str(col).lower() for col in table_data.columns)
+        
+        # Define patterns for different table types
+        table_patterns = {
+            'requirements': ['requirement', 'control', 'measure', 'standard'],
+            'risk_assessment': ['risk', 'impact', 'likelihood', 'score'],
+            'technical_standards': ['rts', 'its', 'technical standard', 'specification'],
+            'compliance': ['compliance', 'status', 'gap', 'assessment'],
+            'controls': ['control', 'description', 'owner', 'status']
         }
         
-        cleaned_text = text
-        for pattern, replacement in cleaning_patterns.items():
-            cleaned_text = re.sub(pattern, replacement, cleaned_text, flags=re.IGNORECASE)
+        for table_type, patterns in table_patterns.items():
+            if any(pattern in header_text for pattern in patterns):
+                return table_type
         
-        return cleaned_text.strip()
+        return 'other'
 
     def _identify_policy_area(self, text: str) -> str:
         """Identify the policy area based on content analysis with improved handling."""
@@ -518,138 +647,447 @@ class DORAComplianceAnalyzer:
                     self.its_requirements[article_num].append(requirement)
 
     def analyze_policy_document(self, policy_pdf_path: str, policy_name: str):
-        """Analyze a policy document with improved relevancy matching."""
-        # Extract text from policy document
-        with open(policy_pdf_path, 'rb') as file:
-            reader = PyPDF2.PdfReader(file)
-            policy_text = ""
-            for page in reader.pages:
-                if page.extract_text():
-                    policy_text += page.extract_text() + "\n"
+        """Analyze a policy document and identify gaps."""
+        if not policy_pdf_path or not policy_name:
+            raise ValueError("Policy path and name must be provided")
         
-        policy_text = self._clean_text(policy_text)
-        
-        # Identify policy area
-        policy_area = self._identify_policy_area(policy_text)
-        print(f"Identified policy area for {policy_name}: {policy_area}")
-        
-        def calculate_similarity(text1, text2):
-            """Calculate similarity between two texts with proper error handling."""
-            try:
-                # Process both texts
-                doc1 = self.nlp(text1)
-                doc2 = self.nlp(text2)
-                
-                # Check if either document is empty
-                if not doc1 or not doc2:
-                    return 0.0
-                    
-                # Get non-empty sentences
-                sents1 = [sent for sent in doc1.sents if len(sent) > 0]
-                sents2 = [sent for sent in doc2.sents if len(sent) > 0]
-                
-                if not sents1 or not sents2:
-                    return 0.0
-                
-                # Calculate similarity using sentence-level comparison
-                similarities = []
-                for sent1 in sents1:
-                    for sent2 in sents2:
-                        # Check if sentences have vectors
-                        if sent1.vector_norm and sent2.vector_norm:
-                            similarities.append(sent1.similarity(sent2))
-                
-                # Return max similarity if we found any, otherwise 0
-                return max(similarities) if similarities else 0.0
-                
-            except Exception as e:
-                print(f"Error calculating similarity: {str(e)}")
-                return 0.0
+        if not Path(policy_pdf_path).exists():
+            raise FileNotFoundError(f"Policy file not found: {policy_pdf_path}")
 
-        # Process only relevant requirements for this policy area
+        print(f"\nAnalyzing policy document: {policy_name}")
+        
+        try:
+            policy_text = []
+            tables_data = []
+            current_table = None
+            table_header = None
+            table_page_start = None
+            
+            # Validate PDF file before processing
+            if not self._is_valid_pdf(policy_pdf_path):
+                raise ValueError(f"Invalid or corrupted PDF file: {policy_pdf_path}")
+
+            with pdfplumber.open(policy_pdf_path) as pdf:
+                total_pages = len(pdf.pages)
+                print(f"Total pages in document: {total_pages}")
+                
+                for page_num, page in enumerate(pdf.pages, 1):
+                    print(f"Processing page {page_num}/{total_pages}")
+                    
+                    try:
+                        # Extract tables from the page
+                        tables = page.extract_tables()
+                        
+                        if tables:
+                            for table_idx, table in enumerate(tables):
+                                # Validate table structure
+                                if not self._is_valid_table(table):
+                                    print(f"Skipping invalid table {table_idx + 1} on page {page_num}")
+                                    continue
+                                    
+                                if not table or not any(row for row in table if any(cell for cell in row)):
+                                    continue  # Skip empty tables
+                                    
+                                # Process table continuation
+                                if current_table is not None:
+                                    is_continuation = self._check_table_continuation(
+                                        current_table, table, page_num
+                                    )
+                                    
+                                    if is_continuation:
+                                        print(f"Detected table continuation on page {page_num}")
+                                        current_table.extend(table[1:])  # Add rows without header
+                                        continue
+                                    else:
+                                        # Process the completed table
+                                        self._process_completed_table(
+                                            current_table, 
+                                            tables_data, 
+                                            start_page=table_page_start,
+                                            end_page=page_num-1
+                                        )
+                                        current_table = table
+                                        table_header = table[0]
+                                        table_page_start = page_num
+                                else:
+                                    current_table = table
+                                    table_header = table[0]
+                                    table_page_start = page_num
+                        
+                        elif current_table is not None:
+                            # Process the completed table
+                            self._process_completed_table(
+                                current_table,
+                                tables_data,
+                                start_page=table_page_start,
+                                end_page=page_num-1
+                            )
+                            current_table = None
+                            table_header = None
+                            table_page_start = None
+                        
+                        # Extract and clean text
+                        text = page.extract_text(x_tolerance=2, y_tolerance=2)
+                        if text:
+                            cleaned_text = self._remove_table_content_from_text_enhanced(text, tables)
+                            if cleaned_text.strip():
+                                policy_text.append(cleaned_text)
+                    
+                    except Exception as e:
+                        print(f"Error processing page {page_num}: {str(e)}")
+                        continue  # Continue with next page
+                
+                # Process any remaining table
+                if current_table is not None:
+                    self._process_completed_table(
+                        current_table,
+                        tables_data,
+                        start_page=table_page_start,
+                        end_page=total_pages
+                    )
+            
+            # Validate and combine extracted content
+            if not policy_text and not tables_data:
+                raise ValueError("No content extracted from the document")
+            
+            # Combine text and formatted table data
+            combined_text = "\n".join(policy_text)
+            if tables_data:
+                combined_text += "\n\nExtracted Tables:\n"
+                combined_text += self._format_tables_data(tables_data)
+            
+            policy_text = self._clean_text(combined_text)
+            
+            # Analyze requirements
+            coverage_results = self._analyze_requirements(policy_text, tables_data)
+            
+            # Store results
+            self.policy_coverage[policy_name] = coverage_results
+            
+            # Generate summary
+            self._print_analysis_summary(policy_name, coverage_results)
+            
+        except Exception as e:
+            print(f"Error processing policy document {policy_name}: {str(e)}")
+            self.policy_coverage[policy_name] = []
+            raise
+
+    def _is_valid_pdf(self, pdf_path: str) -> bool:
+        """Validate PDF file."""
+        try:
+            with pdfplumber.open(pdf_path) as pdf:
+                return len(pdf.pages) > 0
+        except:
+            return False
+
+    def _is_valid_table(self, table: List[List[str]]) -> bool:
+        """Validate table structure."""
+        if not table or not isinstance(table, list):
+            return False
+        
+        # Check if all rows have the same number of columns
+        if not all(isinstance(row, list) for row in table):
+            return False
+        
+        num_cols = len(table[0])
+        return all(len(row) == num_cols for row in table)
+
+    def _check_table_continuation(self, current_table: List[List[str]], 
+                                    new_table: List[List[str]], page_num: int) -> bool:
+        """Check if new table is a continuation of current table."""
+        try:
+            # Exact column match
+            if len(new_table[0]) == len(current_table[0]):
+                return True
+            
+            # Similar column count with header similarity
+            if abs(len(new_table[0]) - len(current_table[0])) <= 1:
+                header_similarity = self._calculate_header_similarity(
+                    current_table[0], new_table[0]
+                )
+                return header_similarity > 0.8
+            
+            return False
+        except Exception as e:
+            print(f"Error checking table continuation on page {page_num}: {str(e)}")
+            return False
+
+    def _analyze_requirements(self, policy_text: str, tables_data: List[Dict]) -> List[Dict]:
+        """Analyze requirements against policy content."""
+        coverage_results = []
+        all_requirements = []
+        
+        # Collect all requirements
         for article_num, requirements in self.rts_requirements.items():
             for req in requirements:
-                if req['policy_area'] == policy_area:
-                    # Get the full requirement text
-                    requirement_text = req.get('full_context', req['requirement_text'])
-                    
-                    # Calculate similarity with proper error handling
-                    similarity_score = calculate_similarity(requirement_text, policy_text)
-                    
-                    if similarity_score > 0.5:  # Adjusted threshold
-                        self.policy_coverage[policy_name].append({
-                            'article_num': article_num,
-                            'requirement_type': 'RTS',
-                            'requirement_text': req['requirement_text'],
-                            'full_context': req.get('full_context', ''),
-                            'covered': similarity_score > 0.7,
-                            'similarity_score': similarity_score,
-                            'policy_area': policy_area
-                        })
+                all_requirements.append({
+                    'article_num': article_num,
+                    'requirement_type': 'RTS',
+                    'requirement_text': req['requirement_text'],
+                    'full_context': req.get('full_context', ''),
+                    'policy_area': req['policy_area']
+                })
         
-        # Repeat for ITS requirements
         for article_num, requirements in self.its_requirements.items():
             for req in requirements:
-                if req['policy_area'] == policy_area:
-                    # Get the full requirement text
-                    requirement_text = req.get('full_context', req['requirement_text'])
-                    
-                    # Calculate similarity with proper error handling
-                    similarity_score = calculate_similarity(requirement_text, policy_text)
-                    
-                    if similarity_score > 0.5:  # Adjusted threshold
-                        self.policy_coverage[policy_name].append({
-                            'article_num': article_num,
-                            'requirement_type': 'ITS',
-                            'requirement_text': req['requirement_text'],
-                            'full_context': req.get('full_context', ''),
-                            'covered': similarity_score > 0.7,
-                            'similarity_score': similarity_score,
-                            'policy_area': policy_area
-                        })
+                all_requirements.append({
+                    'article_num': article_num,
+                    'requirement_type': 'ITS',
+                    'requirement_text': req['requirement_text'],
+                    'full_context': req.get('full_context', ''),
+                    'policy_area': req['policy_area']
+                })
+        
+        print(f"Analyzing {len(all_requirements)} requirements...")
+        
+        for req in all_requirements:
+            try:
+                requirement_text = req['full_context'] or req['requirement_text']
+                
+                # Calculate similarity scores
+                text_similarity = self._calculate_similarity(requirement_text, policy_text)
+                
+                table_similarity = 0.0
+                if tables_data:
+                    table_text = self._format_tables_data(tables_data)
+                    table_similarity = self._calculate_similarity(requirement_text, table_text)
+                
+                similarity_score = max(text_similarity, table_similarity)
+                
+                coverage_results.append({
+                    'article_num': req['article_num'],
+                    'requirement_type': req['requirement_type'],
+                    'requirement_text': req['requirement_text'],
+                    'full_context': req.get('full_context', ''),
+                    'covered': similarity_score > 0.7,
+                    'similarity_score': similarity_score,
+                    'policy_area': req['policy_area']
+                })
+                
+            except Exception as e:
+                print(f"Error analyzing requirement from Article {req['article_num']}: {str(e)}")
+                coverage_results.append({
+                    'article_num': req['article_num'],
+                    'requirement_type': req['requirement_type'],
+                    'requirement_text': req['requirement_text'],
+                    'full_context': req.get('full_context', ''),
+                    'covered': False,
+                    'similarity_score': 0.0,
+                    'policy_area': req['policy_area'],
+                    'error': str(e)
+                })
+        
+        return coverage_results
 
-    def generate_gap_analysis_report(self) -> str:
-        """Generate a detailed gap analysis report with improved organization."""
+    def _print_analysis_summary(self, policy_name: str, coverage_results: List[Dict]):
+        """Print analysis summary."""
+        covered = len([r for r in coverage_results if r['covered']])
+        gaps = len([r for r in coverage_results if not r['covered']])
+        total = len(coverage_results)
+        
+        print("\nAnalysis Summary for", policy_name)
+        print("=" * 40)
+        print(f"Total Requirements: {total}")
+        print(f"Covered Requirements: {covered}")
+        print(f"Gaps Identified: {gaps}")
+        if total > 0:
+            coverage_percentage = (covered / total) * 100
+            print(f"Coverage Percentage: {coverage_percentage:.1f}%")
+
+    def _calculate_similarity(self, text1: str, text2: str) -> float:
+        """Calculate similarity between two texts with improved handling."""
+        try:
+            # Process both texts
+            doc1 = self.nlp(text1[:25000])  # Limit text length to avoid memory issues
+            doc2 = self.nlp(text2[:25000])
+            
+            # Get non-empty sentences
+            sents1 = [sent for sent in doc1.sents if len(sent) > 0]
+            sents2 = [sent for sent in doc2.sents if len(sent) > 0]
+            
+            if not sents1 or not sents2:
+                return 0.0
+            
+            # Calculate similarity using sentence-level comparison
+            max_similarity = 0.0
+            for sent1 in sents1:
+                if not sent1.vector_norm:
+                    continue
+                for sent2 in sents2:
+                    if not sent2.vector_norm:
+                        continue
+                    try:
+                        similarity = sent1.similarity(sent2)
+                        max_similarity = max(max_similarity, similarity)
+                    except Exception:
+                        continue
+            
+            return max_similarity
+            
+        except Exception as e:
+            print(f"Error in similarity calculation: {str(e)}")
+            return 0.0
+
+    def _calculate_header_similarity(self, header1, header2):
+        """Calculate similarity between two table headers."""
+        if not header1 or not header2:
+            return 0.0
+        
+        # Clean and normalize headers
+        clean_header1 = [str(cell).strip().lower() for cell in header1 if cell]
+        clean_header2 = [str(cell).strip().lower() for cell in header2 if cell]
+        
+        # Calculate similarity using fuzzy matching
+        matches = 0
+        total = max(len(clean_header1), len(clean_header2))
+        
+        for h1 in clean_header1:
+            for h2 in clean_header2:
+                # Use similarity ratio from difflib
+                similarity = difflib.SequenceMatcher(None, h1, h2).ratio()
+                if similarity > 0.8:  # High similarity threshold
+                    matches += 1
+                    break
+        
+        return matches / total if total > 0 else 0.0
+
+    def _remove_table_content_from_text_enhanced(self, text: str, tables: List[List[List[str]]]) -> str:
+        """Enhanced removal of table content from extracted text."""
+        if not tables:
+            return text
+        
+        # Create a set of table content with variations
+        table_content = set()
+        for table in tables:
+            for row in table:
+                for cell in row:
+                    if not isinstance(cell, str):
+                        cell = str(cell)
+                    cell = cell.strip()
+                    if cell:
+                        # Add original cell content
+                        table_content.add(cell)
+                        # Add lowercase version
+                        table_content.add(cell.lower())
+                        # Add without extra spaces
+                        table_content.add(' '.join(cell.split()))
+        
+        # Split text into lines and process each line
+        lines = text.split('\n')
+        cleaned_lines = []
+        
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+            
+            # Check if line contains table content
+            should_keep = True
+            for content in table_content:
+                # Use fuzzy matching for more accurate detection
+                if content and len(content) > 3:  # Ignore very short content
+                    if difflib.SequenceMatcher(None, line.lower(), content.lower()).ratio() > 0.8:
+                        should_keep = False
+                        break
+            
+            if should_keep:
+                cleaned_lines.append(line)
+        
+        return '\n'.join(cleaned_lines)
+
+    def _process_completed_table(self, table: List[List[str]], tables_data: List[Dict], 
+                                       start_page: int, end_page: int) -> None:
+        """Process a completed table with page information."""
+        try:
+            # Remove empty rows and clean cell content
+            cleaned_table = [
+                [self._clean_cell_content(cell) for cell in row]
+                for row in table
+                if any(cell.strip() for cell in row)
+            ]
+            
+            if not cleaned_table:
+                return
+            
+            # Create DataFrame
+            df = pd.DataFrame(cleaned_table[1:], columns=cleaned_table[0])
+            
+            # Store table data with metadata
+            tables_data.append({
+                'data': df,
+                'header': cleaned_table[0],
+                'num_rows': len(df),
+                'num_cols': len(df.columns),
+                'start_page': start_page,
+                'end_page': end_page
+            })
+            
+            print(f"Processed table: {len(df)} rows, {len(df.columns)} columns, "
+                  f"pages {start_page}-{end_page}")
+        
+        except Exception as e:
+            print(f"Error processing table: {str(e)}")
+
+    def generate_gap_analysis_report(self):
+        """Generate a detailed gap analysis report."""
         output = []
         
         output.append("DORA Compliance Gap Analysis Report")
         output.append("=" * 50 + "\n")
         
-        # Organize by policy area
-        area_gaps = defaultdict(list)
+        # Track overall statistics
+        total_requirements = 0
+        total_gaps = 0
         
+        # Analyze gaps for each policy
         for policy_name, coverage in self.policy_coverage.items():
-            for item in coverage:
-                if not item['covered']:
-                    area_gaps[item['policy_area']].append({
-                        'policy_name': policy_name,
-                        **item
-                    })
-        
-        # Report gaps by policy area
-        for area, gaps in area_gaps.items():
-            output.append(f"\nPolicy Area: {area.replace('_', ' ').title()}")
+            output.append(f"\nPolicy Document: {policy_name}")
             output.append("-" * 30 + "\n")
             
-            if not gaps:
-                output.append("No gaps identified in this area.\n")
-                continue
+            # Group by policy area
+            area_gaps = defaultdict(list)
+            for item in coverage:
+                if not item['covered']:
+                    area_gaps[item['policy_area']].append(item)
             
-            for gap in gaps:
-                output.append(f"\nArticle {gap['article_num']}:")
-                output.append(f"Policy Document: {gap['policy_name']}")
-                output.append(f"{gap['requirement_type']} Requirement:")
-                output.append(f"- {gap['requirement_text']}")
-                output.append(f"- Similarity Score: {gap['similarity_score']:.2f}")
-                output.append("")
+            # Report gaps by policy area
+            if not area_gaps:
+                output.append("No gaps identified in this policy.\n")
+            else:
+                for area, gaps in area_gaps.items():
+                    output.append(f"\nPolicy Area: {area.replace('_', ' ').title()}")
+                    output.append(f"Number of gaps identified: {len(gaps)}")
+                    
+                    for gap in gaps:
+                        output.append(f"\nArticle {gap['article_num']}:")
+                        output.append(f"Requirement Type: {gap['requirement_type']}")
+                        output.append("Requirement:")
+                        output.append(f"- {gap['requirement_text']}")
+                        if gap.get('full_context'):
+                            output.append("\nFull Context:")
+                            output.append(f"- {gap['full_context']}")
+                        output.append(f"Similarity Score: {gap['similarity_score']:.2f}")
+                        if 'error' in gap:
+                            output.append(f"Analysis Error: {gap['error']}")
+                        output.append("")
+                    
+                    total_gaps += len(gaps)
+                    
+                output.append("-" * 30 + "\n")
             
-            output.append("=" * 50 + "\n")
+            total_requirements += len(coverage)
+        
+        # Add summary statistics
+        output.insert(2, f"\nOverall Statistics:")
+        output.insert(3, f"Total Requirements Analyzed: {total_requirements}")
+        output.insert(4, f"Total Gaps Identified: {total_gaps}")
+        output.insert(5, f"Overall Coverage: {((total_requirements - total_gaps) / total_requirements * 100):.1f}%\n")
         
         return "\n".join(output)
 
 def main():
     # Initialize analyzer with DORA document
-    dora_path = 'CELEX_32022R2554_EN_TXT.pdf'
+    dora_path = '/Users/Tawfiq/Desktop/gpt-pilot-backup-0-2-7-73a8c223/workspace/WorkShop/CELEX_32022R2554_EN_TXT.pdf'
     analyzer = DORAComplianceAnalyzer(dora_path)
     
     # Extract technical standards
@@ -657,7 +1095,7 @@ def main():
     analyzer.extract_technical_standards()
     
     # Define the folder containing policy documents
-    policy_folder = 'policies'
+    policy_folder = '/Users/Tawfiq/Desktop/gpt-pilot-backup-0-2-7-73a8c223/workspace/WorkShop/policies'
     
     # Get all PDF files from the folder
     print(f"Scanning for policy documents in: {policy_folder}")
