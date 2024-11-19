@@ -432,7 +432,7 @@ class DORAComplianceAnalyzer:
         
         return (0.5 * cosine_sim) + (0.5 * semantic_sim)
 
-    def _process_completed_table(self, table: List[List[str]], tables_data: List[Dict]) -> None:
+    def _process_completed_table(self, table: List[List[str]], tables_data: List[Dict], start_page: int = None, end_page: int = None) -> None:
         """Process a completed table and add it to tables_data."""
         try:
             # Remove empty rows and clean cell content
@@ -453,7 +453,9 @@ class DORAComplianceAnalyzer:
                 'data': df,
                 'header': cleaned_table[0],
                 'num_rows': len(df),
-                'num_cols': len(df.columns)
+                'num_cols': len(df.columns),
+                'start_page': start_page,
+                'end_page': end_page
             })
         
         except Exception as e:
