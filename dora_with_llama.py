@@ -1475,11 +1475,8 @@ Implementation Complexity: {complexity_data['complexity_level']}<|eot_id|><|star
     def _generate_executive_summary(self):
         """Generate executive summary of the analysis."""
         total_reqs = sum(len(reqs) for reqs in self.policy_coverage.values())
-
-        covered_reqs = sum(
-            len([req for req in reqs if req.get("covered", False)])
-            for reqs in self.policy_coverage.values()
-        )
+        covered_reqs = sum(len([req for req in reqs if req.get("covered", False)]) 
+                         for reqs in self.policy_coverage.values())
 
         summary = [
             "# DORA Compliance Analysis - Executive Summary",
@@ -1492,6 +1489,14 @@ Implementation Complexity: {complexity_data['complexity_level']}<|eot_id|><|star
             f"- Requirements Covered: {covered_reqs}",
             f"- Coverage Rate: {(covered_reqs/total_reqs*100):.1f}%",
             "",
+            "## DORA Requirements Details",
+            "",
+            "### RTS Requirements",
+            self._format_requirements_details(self.rts_requirements),
+            "",
+            "### ITS Requirements",
+            self._format_requirements_details(self.its_requirements),
+            "",
             "## Critical Gaps",
             self._identify_critical_gaps(),
             "",
@@ -1503,6 +1508,37 @@ Implementation Complexity: {complexity_data['complexity_level']}<|eot_id|><|star
         ]
 
         return "\n".join(summary)
+
+    def _format_requirements_details(self, requirements_dict):
+        """Format detailed requirements from DORA articles."""
+        formatted = []
+        
+        for article_num, reqs in sorted(requirements_dict.items()):
+            formatted.extend([
+                f"\n#### Article {article_num}",
+                "```",
+                f"Total Requirements: {len(reqs)}",
+                "Requirements:",
+            ])
+            
+            for idx, req in enumerate(reqs, 1):
+                formatted.extend([
+                    f"\n{idx}. Requirement Text:",
+                    f"   {req['requirement_text']}",
+                    f"   Policy Area: {req['policy_area']}",
+                    f"   Coverage Status: {'Covered' if req.get('covered', False) else 'Not Covered'}",
+                    f"   Similarity Score: {req.get('similarity_score', 0):.2f}",
+                ])
+                
+                # Add matching sections if available
+                if req.get('matching_sections'):
+                    formatted.append("   Matching Policy Sections:")
+                    for match in req['matching_sections']:
+                        formatted.append(f"   - {match['text'][:200]}...")
+                
+            formatted.append("```\n")
+        
+        return "\n".join(formatted)
 
     def _generate_policy_area_analysis(self):
         """Generate detailed analysis by policy area."""
