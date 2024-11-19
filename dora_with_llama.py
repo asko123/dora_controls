@@ -626,13 +626,22 @@ class DORAComplianceAnalyzer:
                 for page in pdf.pages:
                     policy_text += page.extract_text() + "\n"
             
-            # Process requirements for each policy area
             coverage_results = []
+            total_requirements = 0
+            covered_requirements = 0
             
             # Analyze RTS requirements
+            print("\nAnalyzing RTS requirements...")
             for article_num, reqs in self.rts_requirements.items():
                 for req in reqs:
+                    total_requirements += 1
                     coverage = self._analyze_requirement_coverage(req, policy_text)
+                    if coverage['covered']:
+                        covered_requirements += 1
+                        print(f"\nFound coverage for RTS requirement in Article {article_num}:")
+                        print(f"Requirement: {req['requirement_text'][:200]}...")
+                        print(f"Similarity score: {coverage['similarity_score']:.2f}")
+                    
                     coverage_results.append({
                         'article_num': article_num,
                         'requirement_text': req['requirement_text'],
@@ -642,9 +651,17 @@ class DORAComplianceAnalyzer:
                     })
             
             # Analyze ITS requirements
+            print("\nAnalyzing ITS requirements...")
             for article_num, reqs in self.its_requirements.items():
                 for req in reqs:
+                    total_requirements += 1
                     coverage = self._analyze_requirement_coverage(req, policy_text)
+                    if coverage['covered']:
+                        covered_requirements += 1
+                        print(f"\nFound coverage for ITS requirement in Article {article_num}:")
+                        print(f"Requirement: {req['requirement_text'][:200]}...")
+                        print(f"Similarity score: {coverage['similarity_score']:.2f}")
+                    
                     coverage_results.append({
                         'article_num': article_num,
                         'requirement_text': req['requirement_text'],
@@ -657,7 +674,14 @@ class DORAComplianceAnalyzer:
             self.policy_coverage[policy_name] = coverage_results
             
             # Print analysis summary
-            self._print_analysis_summary(policy_name, coverage_results)
+            print("\nAnalysis Summary:")
+            print(f"Total Requirements Analyzed: {total_requirements}")
+            print(f"Requirements Covered: {covered_requirements}")
+            if total_requirements > 0:
+                coverage_rate = (covered_requirements / total_requirements) * 100
+                print(f"Coverage Rate: {coverage_rate:.1f}%")
+            
+            return coverage_results
             
         except Exception as e:
             print(f"Error analyzing policy document: {str(e)}")
@@ -1152,27 +1176,32 @@ Respond with the most appropriate area name only.""",
             
             for sentence in policy_sentences:
                 try:
+                    # Skip very short sentences
+                    if len(sentence.split()) < 5:
+                        continue
+                        
                     sentence_doc = self.nlp(sentence)
                     if sentence_doc.vector_norm and req_doc.vector_norm:
                         similarity = req_doc.similarity(sentence_doc)
                         if similarity > max_similarity:
                             max_similarity = similarity
-                        if similarity > 0.7:  # High similarity threshold
+                        if similarity > 0.6:  # Adjusted threshold
                             matching_sections.append({
                                 'text': sentence,
                                 'similarity': similarity
                             })
                 except Exception as e:
-                    print(f"Error processing sentence: {str(e)}")
                     continue
             
             # Determine coverage based on similarity and matching sections
-            is_covered = max_similarity > 0.8 or len(matching_sections) > 0
+            is_covered = max_similarity > 0.7 or len(matching_sections) > 0
             
             return {
                 'covered': is_covered,
                 'similarity_score': max_similarity,
-                'matching_sections': matching_sections[:3]  # Top 3 matching sections
+                'matching_sections': sorted(matching_sections, 
+                                         key=lambda x: x['similarity'], 
+                                         reverse=True)[:3]  # Top 3 matching sections
             }
             
         except Exception as e:
@@ -1968,26 +1997,44 @@ Respond with the most appropriate area name only.""",
         print("=" * 40)
         
         # RTS Coverage
-        print("\nRTS Requirements Coverage:")
         total_rts = sum(len(reqs) for reqs in self.rts_requirements.values())
-        covered_rts = sum(
-            len([req for req in reqs if req.get('covered', False)])
-            for reqs in self.rts_requirements.values()
-        )
-        print(f"Total RTS Requirements: {total_rts}")
-        print(f"Covered RTS Requirements: {covered_rts}")
-        print(f"Coverage Rate: {(covered_rts/total_rts*100):.1f}%" if total_rts > 0 else "N/A")
+        covered_rts = 0
+        for reqs in self.rts_requirements.values():
+            for req in reqs:
+                if any(coverage.get('covered', False) 
+                      for coverage in self.policy_coverage.values()):
+                    covered_rts += 1
         
         # ITS Coverage
-        print("\nITS Requirements Coverage:")
         total_its = sum(len(reqs) for reqs in self.its_requirements.values())
-        covered_its = sum(
-            len([req for req in reqs if req.get('covered', False)])
-            for reqs in self.its_requirements.values()
-        )
-        print(f"Total ITS Requirements: {total_its}")
-        print(f"Covered ITS Requirements: {covered_its}")
-        print(f"Coverage Rate: {(covered_its/total_its*100):.1f}%" if total_its > 0 else "N/A")
+        covered_its = 0
+        for reqs in self.its_requirements.values():
+            for req in reqs:
+                if any(coverage.get('covered', False) 
+                      for coverage in self.policy_coverage.values()):
+                    covered_its += 1
+        
+        print("\nRTS Requirements:")
+        print(f"Total: {total_rts}")
+        print(f"Covered: {covered_rts}")
+        if total_rts > 0:
+            print(f"Coverage Rate: {(covered_rts/total_rts*100):.1f}%")
+        
+        print("\nITS Requirements:")
+        print(f"Total: {total_its}")
+        print(f"Covered: {covered_its}")
+        if total_its > 0:
+            print(f"Coverage Rate: {(covered_its/total_its*100):.1f}%")
+        
+        # Print gaps
+        print("\nMajor Gaps:")
+        for req_type, reqs_dict in [("RTS", self.rts_requirements), ("ITS", self.its_requirements)]:
+            for article_num, reqs in reqs_dict.items():
+                for req in reqs:
+                    if not any(coverage.get('covered', False) 
+                             for coverage in self.policy_coverage.values()):
+                        print(f"\n{req_type} Gap in Article {article_num}:")
+                        print(f"Requirement: {req['requirement_text'][:200]}...")
 
 
 def main():
