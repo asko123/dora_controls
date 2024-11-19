@@ -552,7 +552,7 @@ class DORAComplianceAnalyzer:
                     ).group()
                 )
                 llm_sim = max(0.0, min(1.0, llm_sim))
-            except:
+            except (ValueError, AttributeError, TypeError):
                 llm_sim = 0.0
 
             # Combine similarities with weighted average
@@ -981,15 +981,31 @@ class DORAComplianceAnalyzer:
             for row in table:
                 for cell in row:
                     if isinstance(cell, str):
-                        table_content.add(cell.strip())
+                        # Add both exact content and normalized version
+                        cell = cell.strip()
+                        table_content.add(cell)
+                        table_content.add(" ".join(cell.split()))
 
-        # Split text into lines and remove those matching table content
+        # Split text into lines and process each
         lines = text.split("\n")
         cleaned_lines = []
+
         for line in lines:
             line = line.strip()
-            # Keep line if it's not in table content
-            if line and not any(table_text in line for table_text in table_content):
+            # Skip empty lines
+            if not line:
+                continue
+
+            # Check if line contains table content
+            should_keep = True
+            normalized_line = " ".join(line.split())
+
+            for content in table_content:
+                if content in line or content in normalized_line:
+                    should_keep = False
+                    break
+
+            if should_keep:
                 cleaned_lines.append(line)
 
         return "\n".join(cleaned_lines)
@@ -1162,10 +1178,21 @@ Respond with the most appropriate area name only.""",
     def _analyze_requirement_coverage(self, requirement: Dict, policy_text: str) -> Dict:
         """Analyze how well a requirement is covered in the policy text."""
         try:
-            # Prepare texts for comparison
-            req_text = requirement['requirement_text'].lower()
-            policy_text = policy_text.lower()
+            # Ensure we're working with strings
+            if isinstance(requirement['requirement_text'], list):
+                req_text = ' '.join(requirement['requirement_text']).lower()
+            else:
+                req_text = str(requirement['requirement_text']).lower()
+
+            if isinstance(policy_text, list):
+                policy_text = ' '.join(policy_text).lower()
+            else:
+                policy_text = str(policy_text).lower()
             
+            # Skip if either text is empty
+            if not req_text or not policy_text:
+                return {'covered': False, 'similarity_score': 0.0, 'matching_sections': []}
+
             # Split into sentences for more granular analysis
             policy_sentences = [s.strip() for s in re.split(r'[.!?]+', policy_text) if s.strip()]
             
@@ -1177,10 +1204,10 @@ Respond with the most appropriate area name only.""",
             for sentence in policy_sentences:
                 try:
                     # Skip very short sentences
-                    if len(sentence.split()) < 5:
+                    if len(str(sentence).split()) < 5:
                         continue
                         
-                    sentence_doc = self.nlp(sentence)
+                    sentence_doc = self.nlp(str(sentence))
                     if sentence_doc.vector_norm and req_doc.vector_norm:
                         similarity = req_doc.similarity(sentence_doc)
                         if similarity > max_similarity:
@@ -1191,6 +1218,7 @@ Respond with the most appropriate area name only.""",
                                 'similarity': similarity
                             })
                 except Exception as e:
+                    print(f"Error processing sentence: {str(e)}")
                     continue
             
             # Determine coverage based on similarity and matching sections
