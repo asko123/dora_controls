@@ -533,16 +533,11 @@ class DORAComplianceAnalyzer:
             traditional_sim = self._calculate_traditional_similarity(doc1, doc2)
 
             # Use Llama for semantic understanding
-            prompt = [
-                {
-                    "role": "system",
-                    "content": "Compare the semantic similarity of these two texts on a scale of 0 to 1, considering regulatory and technical context:",
-                },
-                {
-                    "role": "user",
-                    "content": f"Text 1: {text1[:1000]}\nText 2: {text2[:1000]}\nProvide only a number between 0 and 1.",
-                },
-            ]
+            prompt = f"""<|begin_of_text|><|start_header_id|>system<|end_header_id|>
+Compare the semantic similarity of these two texts on a scale of 0 to 1, considering regulatory and technical context<|eot_id|><|start_header_id|>user<|end_header_id|>
+Text 1: {text1[:1000]}
+Text 2: {text2[:1000]}
+Provide only a number between 0 and 1.<|eot_id|><|start_header_id|>assistant<|end_header_id|>"""
 
             llm_response = self.llm(prompt, max_new_tokens=10)
             try:
@@ -1130,7 +1125,15 @@ Respond with the most appropriate area name only.""",
                     ]
 
                     llm_response = self.llm(context_prompt, max_new_tokens=20)
-                    llm_area = llm_response[0]["generated_text"].strip().lower()
+                    # Extract the generated text from the response
+                    if isinstance(llm_response, list) and len(llm_response) > 0:
+                        llm_area = llm_response[0]["generated_text"]
+                        if isinstance(llm_area, str):
+                            llm_area = llm_area.strip().lower()
+                        else:
+                            llm_area = str(llm_response).strip().lower()
+                    else:
+                        llm_area = str(llm_response).strip().lower()
 
                     # Add context score to matching area
                     for area, _ in top_areas:
@@ -1337,30 +1340,19 @@ Respond with the most appropriate area name only.""",
         """Assess the implementation complexity of a requirement."""
         try:
             # Prepare analysis prompt
-            complexity_prompt = [
-                {
-                    "role": "system",
-                    "content": """
-                Analyze the implementation complexity of this regulatory requirement.
-                Consider:
-                1. Technical complexity
-                2. Resource requirements
-                3. Dependencies
-                4. Timeline implications
-                5. Operational impact
-                
-                Rate each factor 1-5 and provide brief justification.
-                """,
-                },
-                {
-                    "role": "user",
-                    "content": f"Requirement: {requirement['requirement_text']}",
-                },
-            ]
+            complexity_prompt = f"""<|begin_of_text|><|start_header_id|>system<|end_header_id|>
+Analyze the implementation complexity of this regulatory requirement.
+Consider:
+1. Technical complexity
+2. Resource requirements
+3. Dependencies
+4. Timeline implications
+5. Operational impact
 
-            analysis = self.llm(complexity_prompt, max_new_tokens=200)[0][
-                "generated_text"
-            ]
+Rate each factor 1-5 and provide brief justification.<|eot_id|><|start_header_id|>user<|end_header_id|>
+Requirement: {requirement['requirement_text']}<|eot_id|><|start_header_id|>assistant<|end_header_id|>"""
+
+            analysis = self.llm(complexity_prompt, max_new_tokens=200)[0]["generated_text"]
 
             # Extract scores and calculate weighted complexity
             scores = {
@@ -1397,33 +1389,20 @@ Respond with the most appropriate area name only.""",
         """Calculate the risk level for a requirement."""
         try:
             # Prepare risk analysis prompt
-            risk_prompt = [
-                {
-                    "role": "system",
-                    "content": """
-                Analyze the risk implications of this regulatory requirement.
-                Consider:
-                1. Compliance risk
-                2. Operational risk
-                3. Reputational risk
-                4. Financial risk
-                5. Security risk
-                
-                Rate each risk 1-5 and provide justification.
-                """,
-                },
-                {
-                    "role": "user",
-                    "content": f"""
-                Requirement: {requirement['requirement_text']}
-                Implementation Complexity: {complexity_data['complexity_level']}
-                """,
-                },
-            ]
+            risk_prompt = f"""<|begin_of_text|><|start_header_id|>system<|end_header_id|>
+Analyze the risk implications of this regulatory requirement.
+Consider:
+1. Compliance risk
+2. Operational risk
+3. Reputational risk
+4. Financial risk
+5. Security risk
 
-            risk_analysis = self.llm(risk_prompt, max_new_tokens=200)[0][
-                "generated_text"
-            ]
+Rate each risk 1-5 and provide justification.<|eot_id|><|start_header_id|>user<|end_header_id|>
+Requirement: {requirement['requirement_text']}
+Implementation Complexity: {complexity_data['complexity_level']}<|eot_id|><|start_header_id|>assistant<|end_header_id|>"""
+
+            risk_analysis = self.llm(risk_prompt, max_new_tokens=200)[0]["generated_text"]
 
             # Extract risk scores
             risk_scores = {
