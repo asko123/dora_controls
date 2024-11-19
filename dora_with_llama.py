@@ -449,7 +449,7 @@ def _process_completed_table(self, table: List[List[str]], tables_data: List[Dic
                 cleaned_table.append(cleaned_row)
         
         if not cleaned_table:
-            return
+            return 
         
         # Create DataFrame
         df = pd.DataFrame(cleaned_table[1:], columns=cleaned_table[0])
