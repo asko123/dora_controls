@@ -682,122 +682,83 @@ Respond with the most appropriate area name only."""}
             r"(?:EBA|ESMA)\s+shall\s+develop\s+(?:draft\s+)?implementing\s+technical\s+standards?\s+([^\.]+\.[^\.]+)"
         ]
 
-        def extract_full_requirement(text, match_start, max_chars=1000):
-            """Extract the full requirement context with improved boundary detection."""
-            # Find the start of the relevant section
-            start = max(0, match_start - max_chars)
-            temp_start = text.rfind('.', start, match_start)
-            if temp_start != -1:
-                start = temp_start + 1
+        try:
+            # Extract articles with enhanced pattern
+            article_pattern = r"Article\s+(\d+[a-z]?)\s*[–-]?\s*([^\n]+)(?:\n|\r\n?)(.*?)(?=Article\s+\d+[a-z]?|$)"
+            articles = re.finditer(article_pattern, self.dora_text, re.DOTALL | re.IGNORECASE)
             
-            # Find the end of the requirement
-            end = match_start + max_chars
-            temp_end = text.find('.', match_start)
-            while True:
-                next_end = text.find('.', temp_end + 1)
-                if next_end == -1 or next_end > end or next_end - temp_end > 200:
-                    break
-                temp_end = next_end
-            end = temp_end + 1 if temp_end != -1 else end
+            print("\nExtracting requirements from articles...")
+            articles_processed = 0
+            rts_found = 0
+            its_found = 0
             
-            return text[start:end].strip()
-
-        # Extract articles with enhanced pattern
-        article_pattern = r"Article\s+(\d+[a-z]?)\s*[–-]?\s*([^\n]+)(?:\n|\r\n?)(.*?)(?=Article\s+\d+[a-z]?|$)"
-        articles = re.finditer(article_pattern, self.dora_text, re.DOTALL | re.IGNORECASE)
-        
-        print("\nExtracting requirements from articles...")
-        articles_processed = 0
-        rts_found = 0
-        its_found = 0
-        
-        for article in articles:
-            articles_processed += 1
-            article_num = article.group(1)
-            article_title = article.group(2).strip()
-            article_content = article.group(3).strip()
+            for article in articles:
+                articles_processed += 1
+                article_num = article.group(1)
+                article_title = article.group(2).strip()
+                article_content = article.group(3).strip()
+                
+                print(f"\nProcessing Article {article_num}: {article_title}")
+                
+                # Identify policy area for the article
+                article_area = self._identify_policy_area(f"{article_title} {article_content}")
+                print(f"Identified policy area: {article_area}")
+                
+                # Process RTS requirements
+                for pattern in rts_patterns:
+                    matches = re.finditer(pattern, article_content, re.IGNORECASE | re.MULTILINE)
+                    for match in matches:
+                        rts_found += 1
+                        full_requirement = self._extract_full_requirement(article_content, match.start())
+                        print(f"\nFound RTS requirement in Article {article_num}:")
+                        print(f"Requirement text: {match.group(1)[:200]}...")
+                        
+                        requirement = {
+                            'article_num': article_num,
+                            'article_title': article_title,
+                            'requirement_text': match.group(1).strip(),
+                            'full_context': full_requirement,
+                            'type': 'RTS',
+                            'policy_area': article_area,
+                            'pattern_matched': pattern
+                        }
+                        self.rts_requirements[article_num].append(requirement)
+                
+                # Process ITS requirements
+                for pattern in its_patterns:
+                    matches = re.finditer(pattern, article_content, re.IGNORECASE | re.MULTILINE)
+                    for match in matches:
+                        its_found += 1
+                        full_requirement = self._extract_full_requirement(article_content, match.start())
+                        print(f"\nFound ITS requirement in Article {article_num}:")
+                        print(f"Requirement text: {match.group(1)[:200]}...")
+                        
+                        requirement = {
+                            'article_num': article_num,
+                            'article_title': article_title,
+                            'requirement_text': match.group(1).strip(),
+                            'full_context': full_requirement,
+                            'type': 'ITS',
+                            'policy_area': article_area,
+                            'pattern_matched': pattern
+                        }
+                        self.its_requirements[article_num].append(requirement)
             
-            print(f"\nProcessing Article {article_num}: {article_title}")
+            # Summary statistics
+            total_rts = sum(len(reqs) for reqs in self.rts_requirements.values())
+            total_its = sum(len(reqs) for reqs in self.its_requirements.values())
             
-            # Identify policy area for the article
-            article_area = self._identify_policy_area(f"{article_title} {article_content}")
-            print(f"Identified policy area: {article_area}")
+            print("\nExtraction Summary:")
+            print(f"Articles processed: {articles_processed}")
+            print(f"RTS requirements found: {total_rts}")
+            print(f"ITS requirements found: {total_its}")
+            print(f"Total requirements: {total_rts + total_its}")
             
-            # Process RTS requirements
-            for pattern in rts_patterns:
-                matches = re.finditer(pattern, article_content, re.IGNORECASE | re.MULTILINE)
-                for match in matches:
-                    rts_found += 1
-                    full_requirement = extract_full_requirement(article_content, match.start())
-                    print(f"\nFound RTS requirement in Article {article_num}:")
-                    print(f"Requirement text: {match.group(1)[:200]}...")
-                    
-                    requirement = {
-                        'article_num': article_num,
-                        'article_title': article_title,
-                        'requirement_text': match.group(1).strip(),
-                        'full_context': full_requirement,
-                        'type': 'RTS',
-                        'policy_area': article_area,
-                        'pattern_matched': pattern
-                    }
-                    self.rts_requirements[article_num].append(requirement)
+            return total_rts + total_its
             
-            # Process ITS requirements
-            for pattern in its_patterns:
-                matches = re.finditer(pattern, article_content, re.IGNORECASE | re.MULTILINE)
-                for match in matches:
-                    its_found += 1
-                    full_requirement = extract_full_requirement(article_content, match.start())
-                    print(f"\nFound ITS requirement in Article {article_num}:")
-                    print(f"Requirement text: {match.group(1)[:200]}...")
-                    
-                    requirement = {
-                        'article_num': article_num,
-                        'article_title': article_title,
-                        'requirement_text': match.group(1).strip(),
-                        'full_context': full_requirement,
-                        'type': 'ITS',
-                        'policy_area': article_area,
-                        'pattern_matched': pattern
-                    }
-                    self.its_requirements[article_num].append(requirement)
-        
-        # Summary statistics
-        total_rts = sum(len(reqs) for reqs in self.rts_requirements.values())
-        total_its = sum(len(reqs) for reqs in self.its_requirements.values())
-        
-        print("\nExtraction Summary:")
-        print(f"Articles processed: {articles_processed}")
-        print(f"RTS requirements found: {total_rts}")
-        print(f"ITS requirements found: {total_its}")
-        print(f"Total requirements: {total_rts + total_its}")
-        
-        if total_rts + total_its == 0:
-            print("\nWARNING: No requirements were found. This might indicate:")
-            print("1. The DORA text wasn't properly extracted")
-            print("2. The requirement patterns need adjustment")
-            print("3. The text format is unexpected")
-            
-            # Debug output
-            print("\nDebug Information:")
-            print(f"Text length: {len(self.dora_text)}")
-            print("First 500 characters of text:")
-            print(self.dora_text[:500])
-            
-            # Check for pattern matches in full text
-            print("\nChecking for basic pattern matches in full text:")
-            basic_patterns = [
-                r"RTS",
-                r"ITS",
-                r"regulatory\s+technical\s+standards?",
-                r"implementing\s+technical\s+standards?"
-            ]
-            for pattern in basic_patterns:
-                matches = re.findall(pattern, self.dora_text, re.IGNORECASE)
-                print(f"Pattern '{pattern}': {len(matches)} matches found")
-
-        return total_rts + total_its
+        except Exception as e:
+            print(f"Error in technical standards extraction: {str(e)}")
+            return 0
 
     def analyze_policy_document(self, policy_pdf_path: str, policy_name: str):
         """Analyze a policy document and identify gaps."""
