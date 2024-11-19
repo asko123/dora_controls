@@ -723,22 +723,33 @@ Provide only a number between 0 and 1.<|eot_id|><|start_header_id|>assistant<|en
                     "-" * (len(str(article_num)) + 8)
                 ])
                 
-                for idx, req in enumerate(reqs, 1):
-                    coverage_status = "✓ Covered" if req.get('covered', False) else "✗ Not Covered"
-                    report_sections.extend([
-                        f"\nRequirement {idx}:",
-                        f"Text: {req['requirement_text']}",
-                        f"Policy Area: {req['policy_area']}",
-                        f"Status: {coverage_status}",
-                        f"Similarity Score: {req.get('similarity_score', 0):.2f}"
-                    ])
-                    
-                    if req.get('matching_sections'):
-                        report_sections.append("\nMatching Policy Sections:")
-                        for match in req['matching_sections']:
-                            report_sections.append(f"- {match['text'][:200]}...")
-                    
-                    report_sections.append("")  # Add spacing
+                # Show both covered and not covered requirements
+                covered_reqs = [r for r in reqs if r.get('covered', False)]
+                uncovered_reqs = [r for r in reqs if not r.get('covered', False)]
+                
+                if covered_reqs:
+                    report_sections.append("\nCovered Requirements:")
+                    for idx, req in enumerate(covered_reqs, 1):
+                        report_sections.extend([
+                            f"\nRequirement {idx}:",
+                            f"Text: {req['requirement_text']}",
+                            f"Policy Area: {req['policy_area']}",
+                            f"Similarity Score: {req.get('similarity_score', 0):.2f}"
+                        ])
+                        if req.get('matching_sections'):
+                            report_sections.append("Matching Policy Sections:")
+                            for match in req['matching_sections']:
+                                report_sections.append(f"- {match['text'][:200]}...")
+                
+                if uncovered_reqs:
+                    report_sections.append("\nGaps (Not Covered):")
+                    for idx, req in enumerate(uncovered_reqs, 1):
+                        report_sections.extend([
+                            f"\nRequirement {idx}:",
+                            f"Text: {req['requirement_text']}",
+                            f"Policy Area: {req['policy_area']}",
+                            f"Similarity Score: {req.get('similarity_score', 0):.2f}"
+                        ])
             
             # Detailed ITS Requirements
             report_sections.append("\n2.2 ITS Requirements:")
@@ -749,22 +760,33 @@ Provide only a number between 0 and 1.<|eot_id|><|start_header_id|>assistant<|en
                     "-" * (len(str(article_num)) + 8)
                 ])
                 
-                for idx, req in enumerate(reqs, 1):
-                    coverage_status = "✓ Covered" if req.get('covered', False) else "✗ Not Covered"
-                    report_sections.extend([
-                        f"\nRequirement {idx}:",
-                        f"Text: {req['requirement_text']}",
-                        f"Policy Area: {req['policy_area']}",
-                        f"Status: {coverage_status}",
-                        f"Similarity Score: {req.get('similarity_score', 0):.2f}"
-                    ])
-                    
-                    if req.get('matching_sections'):
-                        report_sections.append("\nMatching Policy Sections:")
-                        for match in req['matching_sections']:
-                            report_sections.append(f"- {match['text'][:200]}...")
-                    
-                    report_sections.append("")  # Add spacing
+                # Show both covered and not covered requirements
+                covered_reqs = [r for r in reqs if r.get('covered', False)]
+                uncovered_reqs = [r for r in reqs if not r.get('covered', False)]
+                
+                if covered_reqs:
+                    report_sections.append("\nCovered Requirements:")
+                    for idx, req in enumerate(covered_reqs, 1):
+                        report_sections.extend([
+                            f"\nRequirement {idx}:",
+                            f"Text: {req['requirement_text']}",
+                            f"Policy Area: {req['policy_area']}",
+                            f"Similarity Score: {req.get('similarity_score', 0):.2f}"
+                        ])
+                        if req.get('matching_sections'):
+                            report_sections.append("Matching Policy Sections:")
+                            for match in req['matching_sections']:
+                                report_sections.append(f"- {match['text'][:200]}...")
+                
+                if uncovered_reqs:
+                    report_sections.append("\nGaps (Not Covered):")
+                    for idx, req in enumerate(uncovered_reqs, 1):
+                        report_sections.extend([
+                            f"\nRequirement {idx}:",
+                            f"Text: {req['requirement_text']}",
+                            f"Policy Area: {req['policy_area']}",
+                            f"Similarity Score: {req.get('similarity_score', 0):.2f}"
+                        ])
             
             # Gap Analysis by Policy Area
             report_sections.extend([
@@ -782,18 +804,14 @@ Provide only a number between 0 and 1.<|eot_id|><|start_header_id|>assistant<|en
                 total_area = len(area_reqs)
                 covered_area = len([r for r in area_reqs if r.get('covered', False)])
                 
+                coverage_rate = (covered_area/total_area*100) if total_area > 0 else 0
+                
                 report_sections.extend([
                     f"\n{area.replace('_', ' ').title()}:",
                     f"Total Requirements: {total_area}",
                     f"Requirements Covered: {covered_area}",
-                    f"Coverage Rate: {(covered_area/total_area*100):.1f}% if total_area > 0 else 'N/A'",
-                    "\nMajor Gaps:"
+                    f"Coverage Rate: {coverage_rate:.1f}%"
                 ])
-                
-                # List major gaps in this area
-                gaps = [r for r in area_reqs if not r.get('covered', False)]
-                for gap in gaps[:3]:  # Show top 3 gaps
-                    report_sections.append(f"- {gap['requirement_text'][:200]}...")
             
             # Recommendations
             report_sections.extend([
