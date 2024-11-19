@@ -1921,7 +1921,7 @@ Respond with the most appropriate area name only."""}
         print("-" * 40)
         print(f"Total Requirements: {total_reqs}")
         print(f"Requirements Covered: {covered_reqs}")
-        print(f"Coverage Rate: {(covered_reqs/total_reqs*100):.1f}% if total_reqs > 0 else 'N/A'}")
+        print(f"Coverage Rate: {(covered_reqs/total_reqs*100):.1f}%" if total_reqs > 0 else "Coverage Rate: N/A")
         
         # Print coverage by requirement type
         rts_reqs = len([r for r in coverage_results if r['requirement_type'] == 'RTS'])
