@@ -1440,37 +1440,83 @@ Implementation Complexity: {complexity_data['complexity_level']}<|eot_id|><|star
     def generate_detailed_report(self):
         """Generate a comprehensive analysis report."""
         try:
-            report_sections = []
-
-            # Executive Summary
-            report_sections.append(self._generate_executive_summary())
-
-            # Detailed Analysis by Policy Area
-            report_sections.append(self._generate_policy_area_analysis())
-
-            # Risk and Complexity Assessment
-            report_sections.append(self._generate_risk_complexity_analysis())
-
-            # Gap Analysis
-            report_sections.append(self._generate_gap_analysis())
-
-            # Implementation Recommendations
-            report_sections.append(self._generate_implementation_recommendations())
-
-            # Save report
-            full_report = "\n\n".join(report_sections)
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-
-            with open(
-                f"dora_analysis_report_{timestamp}.md", "w", encoding="utf-8"
-            ) as f:
-                f.write(full_report)
-
-            return full_report
-
+            report_sections = [
+                "# DORA Compliance Analysis Report",
+                f"\nGenerated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+                "\n## 1. DORA Legal Text and Requirements",
+                "\n### 1.1 RTS (Regulatory Technical Standards) Requirements",
+                self._format_detailed_requirements(self.rts_requirements, "RTS"),
+                "\n### 1.2 ITS (Implementing Technical Standards) Requirements",
+                self._format_detailed_requirements(self.its_requirements, "ITS"),
+                "\n## 2. Coverage Analysis",
+                self._generate_coverage_analysis(),
+                "\n## 3. Gap Analysis",
+                self._generate_gap_analysis(),
+            ]
+            
+            return "\n".join(report_sections)
         except Exception as e:
             print(f"Error generating report: {str(e)}")
-            return str(e)
+            return "Error generating report"
+
+    def _format_detailed_requirements(self, requirements_dict, req_type):
+        """Format detailed requirements with full legal text."""
+        sections = []
+        
+        for article_num, reqs in sorted(requirements_dict.items()):
+            sections.extend([
+                f"\n#### Article {article_num}",
+                "```",
+                "Legal Text:",
+            ])
+            
+            # Add full article text if available
+            article_text = self._extract_article_text(article_num)
+            if article_text:
+                sections.append(f"{article_text}\n")
+            
+            sections.append(f"{req_type} Requirements in this Article:")
+            
+            for idx, req in enumerate(reqs, 1):
+                sections.extend([
+                    f"\n{idx}. Requirement Details:",
+                    f"   Text: {req['requirement_text']}",
+                    f"   Type: {req_type}",
+                    f"   Policy Area: {req['policy_area']}",
+                    f"   Full Context: {req.get('full_context', 'Not available')}",
+                    "   Implementation Status:",
+                    f"   - Coverage: {'Covered' if req.get('covered', False) else 'Not Covered'}",
+                    f"   - Similarity Score: {req.get('similarity_score', 0):.2f}",
+                ])
+                
+                # Add matching sections if available
+                if req.get('matching_sections'):
+                    sections.append("   Matching Policy Sections:")
+                    for match in req['matching_sections']:
+                        sections.append(f"   - {match['text'][:200]}...")
+                
+                sections.append("")  # Add spacing between requirements
+            
+            sections.append("```\n")
+        
+        return "\n".join(sections)
+
+    def _extract_article_text(self, article_num):
+        """Extract full article text from DORA document."""
+        try:
+            # Find the article in the full DORA text
+            article_pattern = rf"Article\s+{article_num}\s*[–-]?\s*([^\n]+)(?:\n|\r\n?)(.*?)(?=Article\s+\d+[a-z]?|$)"
+            match = re.search(article_pattern, self.dora_text, re.DOTALL | re.IGNORECASE)
+            
+            if match:
+                title = match.group(1).strip()
+                content = match.group(2).strip()
+                return f"Title: {title}\n\nContent:\n{content}"
+            return "Article text not found"
+            
+        except Exception as e:
+            print(f"Error extracting article text: {str(e)}")
+            return "Error extracting article text"
 
     def _generate_executive_summary(self):
         """Generate executive summary of the analysis."""
