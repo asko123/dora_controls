@@ -546,9 +546,11 @@ class DORAComplianceAnalyzer:
 
             llm_response = self.llm(prompt, max_new_tokens=10)
             try:
+                # Extract the generated text from the response
+                generated_text = llm_response[0]["generated_text"] if isinstance(llm_response, list) else str(llm_response)
                 llm_sim = float(
                     re.search(
-                        r"([0-9]*[.])?[0-9]+", llm_response[0]["generated_text"]
+                        r"([0-9]*[.])?[0-9]+", generated_text
                     ).group()
                 )
                 llm_sim = max(0.0, min(1.0, llm_sim))
@@ -2063,6 +2065,22 @@ Respond with the most appropriate area name only.""",
                              for coverage in self.policy_coverage.values()):
                         print(f"\n{req_type} Gap in Article {article_num}:")
                         print(f"Requirement: {req['requirement_text'][:200]}...")
+
+    def _extract_full_requirement(self, text: str, start_pos: int) -> str:
+        """Extract the full requirement context from the text."""
+        # Find the start of the sentence
+        sentence_start = text.rfind('.', 0, start_pos) + 1
+        if sentence_start == 0:
+            sentence_start = text.rfind('\n', 0, start_pos) + 1
+        
+        # Find the end of the sentence
+        sentence_end = text.find('.', start_pos)
+        if sentence_end == -1:
+            sentence_end = len(text)
+        
+        # Extract and clean the requirement text
+        requirement = text[sentence_start:sentence_end].strip()
+        return requirement if requirement else text[max(0, start_pos-100):min(len(text), start_pos+100)]
 
 
 def main():
