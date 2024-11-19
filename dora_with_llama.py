@@ -1548,11 +1548,10 @@ Respond with the most appropriate area name only."""}
 
     def _generate_executive_summary(self):
         """Generate executive summary of the analysis."""
-        total_reqs = sum(len(reqs) for reqs in self.rts_requirements.values()) + \
-                    sum(len(reqs) for reqs in self.its_requirements.values())
+        total_reqs = sum(len(reqs) for reqs in self.policy_coverage.values())
         
-        covered_reqs = sum(1 for reqs in self.policy_coverage.values() 
-                          for req in reqs if req['covered'])
+        covered_reqs = sum(len([req for req in reqs if req.get('covered', False)]) 
+                          for reqs in self.policy_coverage.values())
         
         summary = [
             "# DORA Compliance Analysis - Executive Summary",
@@ -1604,53 +1603,172 @@ Respond with the most appropriate area name only."""}
 
     def _generate_area_requirements_summary(self, area, data):
         """Generate requirements overview for a policy area."""
-        # Implementation to generate area requirements summary
-        pass
+        total_reqs = len(data)
+        rts_reqs = len([req for req in data if req.get('requirement_type') == 'RTS'])
+        its_reqs = len([req for req in data if req.get('requirement_type') == 'ITS'])
+        
+        return "\n".join([
+            f"Total Requirements: {total_reqs}",
+            f"RTS Requirements: {rts_reqs}",
+            f"ITS Requirements: {its_reqs}",
+            "",
+            "Key Requirements:",
+            *[f"- {req['requirement_text'][:200]}..." for req in data[:3]]
+        ])
 
     def _generate_area_complexity_summary(self, area, data):
         """Generate complexity summary for a policy area."""
-        # Implementation to generate area complexity summary
-        pass
+        complexity_scores = [req.get('similarity_score', 0) for req in data]
+        avg_complexity = sum(complexity_scores) / len(complexity_scores) if complexity_scores else 0
+        
+        return "\n".join([
+            f"Average Complexity Score: {avg_complexity:.2f}",
+            "Complexity Distribution:",
+            f"- High Complexity: {len([s for s in complexity_scores if s > 0.7])}",
+            f"- Medium Complexity: {len([s for s in complexity_scores if 0.3 < s <= 0.7])}",
+            f"- Low Complexity: {len([s for s in complexity_scores if s <= 0.3])}"
+        ])
 
     def _generate_area_risk_summary(self, area, data):
         """Generate risk summary for a policy area."""
-        # Implementation to generate area risk summary
-        pass
+        covered = len([req for req in data if req.get('covered', False)])
+        total = len(data)
+        risk_level = "High" if covered/total < 0.6 else "Medium" if covered/total < 0.8 else "Low"
+        
+        return "\n".join([
+            f"Risk Level: {risk_level}",
+            f"Coverage Rate: {(covered/total*100):.1f}%",
+            "Risk Factors:",
+            "- Compliance gaps" if covered/total < 0.8 else "",
+            "- Implementation complexity" if any(req.get('similarity_score', 0) > 0.7 for req in data) else "",
+            "- Technical dependencies" if len(data) > 5 else ""
+        ])
 
     def _generate_area_coverage_summary(self, area, data):
         """Generate coverage summary for a policy area."""
-        # Implementation to generate area coverage summary
-        pass
+        covered = [req for req in data if req.get('covered', False)]
+        gaps = [req for req in data if not req.get('covered', False)]
+        
+        return "\n".join([
+            f"Coverage Statistics:",
+            f"- Requirements Covered: {len(covered)}",
+            f"- Requirements Not Covered: {len(gaps)}",
+            f"- Coverage Percentage: {(len(covered)/len(data)*100):.1f}%",
+            "",
+            "Major Gaps:" if gaps else "No Major Gaps Identified",
+            *[f"- {gap['requirement_text'][:150]}..." for gap in gaps[:3]]
+        ])
 
     def _generate_risk_complexity_analysis(self):
         """Generate risk and complexity analysis."""
-        # Implementation to generate risk and complexity analysis
-        pass
+        all_requirements = []
+        for reqs in self.policy_coverage.values():
+            all_requirements.extend(reqs)
+        
+        high_risk = [req for req in all_requirements if req.get('similarity_score', 0) < 0.3]
+        medium_risk = [req for req in all_requirements if 0.3 <= req.get('similarity_score', 0) < 0.7]
+        
+        return "\n".join([
+            "# Risk and Complexity Analysis",
+            "",
+            "## High Risk Areas",
+            *[f"- {req['requirement_text'][:150]}..." for req in high_risk[:5]],
+            "",
+            "## Medium Risk Areas",
+            *[f"- {req['requirement_text'][:150]}..." for req in medium_risk[:5]]
+        ])
 
     def _generate_gap_analysis(self):
         """Generate gap analysis."""
-        # Implementation to generate gap analysis
-        pass
+        gaps_by_area = {}
+        for area, reqs in self.policy_coverage.items():
+            gaps = [req for req in reqs 
+                    if not req.get('covered', False) and req.get('similarity_score', 0) < 0.3]
+            if gaps:
+                gaps_by_area[area] = gaps
+        
+        return "\n".join([
+            "# Gap Analysis",
+            "",
+            *[f"## {area.replace('_', ' ').title()}\n" + 
+              "\n".join([f"- {gap['requirement_text'][:150]}..." for gap in gaps])
+              for area, gaps in gaps_by_area.items()]
+        ])
 
     def _generate_implementation_recommendations(self):
         """Generate implementation recommendations."""
-        # Implementation to generate implementation recommendations
-        pass
+        all_gaps = []
+        for reqs in self.policy_coverage.values():
+            all_gaps.extend([req for req in reqs if not req.get('covered', False)])
+        
+        prioritized_gaps = sorted(all_gaps, key=lambda x: x.get('similarity_score', 0))
+        
+        return "\n".join([
+            "# Implementation Recommendations",
+            "",
+            "## Immediate Actions",
+            *[f"- {gap['requirement_text'][:150]}..." for gap in prioritized_gaps[:3]],
+            "",
+            "## Short-term Actions",
+            *[f"- {gap['requirement_text'][:150]}..." for gap in prioritized_gaps[3:6]],
+            "",
+            "## Long-term Actions",
+            *[f"- {gap['requirement_text'][:150]}..." for gap in prioritized_gaps[6:9]]
+        ])
 
     def _generate_risk_summary(self):
         """Generate risk summary."""
-        # Implementation to generate risk summary
-        pass
+        total_reqs = sum(len(reqs) for reqs in self.policy_coverage.values())
+        covered_reqs = sum(len([req for req in reqs if req.get('covered', False)]) 
+                          for reqs in self.policy_coverage.values())
+        
+        risk_level = "High" if covered_reqs/total_reqs < 0.6 else \
+                     "Medium" if covered_reqs/total_reqs < 0.8 else "Low"
+        
+        return "\n".join([
+            f"Overall Risk Level: {risk_level}",
+            f"Overall Coverage: {(covered_reqs/total_reqs*100):.1f}%",
+            "",
+            "Key Risk Areas:",
+            "- Compliance Risk" if covered_reqs/total_reqs < 0.8 else "",
+            "- Operational Risk" if any(len(reqs) > 10 for reqs in self.policy_coverage.values()) else "",
+            "- Technical Risk" if any(req.get('similarity_score', 0) > 0.7 
+                                        for reqs in self.policy_coverage.values() 
+                                        for req in reqs) else ""
+        ])
 
     def _generate_priority_recommendations(self):
         """Generate priority recommendations."""
-        # Implementation to generate priority recommendations
-        pass
+        all_requirements = []
+        for reqs in self.policy_coverage.values():
+            all_requirements.extend(reqs)
+        
+        critical_gaps = [req for req in all_requirements 
+                        if not req.get('covered', False) and req.get('similarity_score', 0) < 0.3]
+        
+        return "\n".join([
+            "Priority Recommendations:",
+            "",
+            "Critical Actions:",
+            *[f"- {gap['requirement_text'][:150]}..." for gap in critical_gaps[:3]],
+            "",
+            "Key Focus Areas:",
+            "- Implement missing technical controls",
+            "- Enhance documentation coverage",
+            "- Establish monitoring mechanisms"
+        ])
 
     def _identify_critical_gaps(self):
         """Identify critical gaps."""
-        # Implementation to identify critical gaps
-        pass
+        critical_gaps = []
+        for area, reqs in self.policy_coverage.items():
+            area_gaps = [req for req in reqs 
+                        if not req.get('covered', False) and req.get('similarity_score', 0) < 0.3]
+            if area_gaps:
+                critical_gaps.append(f"\n{area.replace('_', ' ').title()}:")
+                critical_gaps.extend([f"- {gap['requirement_text'][:150]}..." for gap in area_gaps[:2]])
+        
+        return "\n".join(critical_gaps) if critical_gaps else "No critical gaps identified."
 
     def analyze_and_report(self):
         """Main method to run complete analysis and generate reports."""
@@ -1753,6 +1871,105 @@ Respond with the most appropriate area name only."""}
                 formatted.append("")
         
         return "\n".join(formatted)
+
+    def _remove_table_content_from_text_enhanced(self, text: str, tables: List[List[List[str]]]) -> str:
+        """Remove table content from text with enhanced accuracy."""
+        if not tables:
+            return text
+        
+        # Create a set of table content for faster lookup
+        table_content = set()
+        for table in tables:
+            for row in table:
+                for cell in row:
+                    if isinstance(cell, str):
+                        # Add both exact content and normalized version
+                        cell = cell.strip()
+                        table_content.add(cell)
+                        table_content.add(' '.join(cell.split()))
+        
+        # Split text into lines and process each
+        lines = text.split('\n')
+        cleaned_lines = []
+        
+        for line in lines:
+            line = line.strip()
+            # Skip empty lines
+            if not line:
+                continue
+            
+            # Check if line contains table content
+            should_keep = True
+            normalized_line = ' '.join(line.split())
+            
+            for content in table_content:
+                if content in line or content in normalized_line:
+                    should_keep = False
+                    break
+            
+            if should_keep:
+                cleaned_lines.append(line)
+        
+        return '\n'.join(cleaned_lines)
+
+    def _print_analysis_summary(self, policy_name: str, coverage_results: List[Dict]) -> None:
+        """Print summary of analysis results."""
+        total_reqs = len(coverage_results)
+        covered_reqs = len([r for r in coverage_results if r['covered']])
+        
+        print(f"\nAnalysis Summary for {policy_name}")
+        print("-" * 40)
+        print(f"Total Requirements: {total_reqs}")
+        print(f"Requirements Covered: {covered_reqs}")
+        print(f"Coverage Rate: {(covered_reqs/total_reqs*100):.1f}% if total_reqs > 0 else 'N/A'}")
+        
+        # Print coverage by requirement type
+        rts_reqs = len([r for r in coverage_results if r['requirement_type'] == 'RTS'])
+        its_reqs = len([r for r in coverage_results if r['requirement_type'] == 'ITS'])
+        print(f"\nRTS Requirements: {rts_reqs}")
+        print(f"ITS Requirements: {its_reqs}")
+        
+        # Print major gaps if any
+        gaps = [r for r in coverage_results if not r['covered']]
+        if gaps:
+            print("\nMajor Gaps Identified:")
+            for gap in gaps[:3]:  # Show top 3 gaps
+                print(f"- Article {gap['article_num']}: {gap['requirement_text'][:100]}...")
+
+    def _calculate_header_similarity(self, header1: List[str], header2: List[str]) -> float:
+        """Calculate similarity between two table headers."""
+        try:
+            # Clean and normalize headers
+            def normalize_header(header):
+                return [str(col).lower().strip() for col in header]
+            
+            norm_header1 = normalize_header(header1)
+            norm_header2 = normalize_header(header2)
+            
+            # Calculate exact matches
+            exact_matches = sum(1 for h1, h2 in zip(norm_header1, norm_header2) if h1 == h2)
+            
+            # Calculate fuzzy matches for non-exact matches
+            fuzzy_similarity = 0
+            for h1, h2 in zip(norm_header1, norm_header2):
+                if h1 != h2:
+                    # Use spaCy for semantic similarity
+                    doc1 = self.nlp(h1)
+                    doc2 = self.nlp(h2)
+                    if doc1.vector_norm and doc2.vector_norm:
+                        fuzzy_similarity += doc1.similarity(doc2)
+            
+            # Combine exact and fuzzy matches
+            max_len = max(len(header1), len(header2))
+            if max_len == 0:
+                return 0.0
+            
+            similarity = (exact_matches + 0.5 * fuzzy_similarity) / max_len
+            return min(1.0, max(0.0, similarity))
+            
+        except Exception as e:
+            print(f"Error calculating header similarity: {str(e)}")
+            return 0.0
 
 def main():
     # Initialize analyzer with DORA document
