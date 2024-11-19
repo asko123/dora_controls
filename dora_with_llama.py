@@ -656,6 +656,10 @@ Respond with the most appropriate area name only."""}
 
     def extract_technical_standards(self):
         """Extract RTS and ITS requirements with enhanced detection and logging."""
+        print("Inside extract_technical_standards method")  # Debug print
+        if not hasattr(self, 'dora_text'):
+            print("Error: dora_text not initialized")
+            return
         print("\nStarting technical standards extraction...")
         
         # More comprehensive patterns for RTS
@@ -1943,12 +1947,16 @@ Respond with the most appropriate area name only."""}
 
 def main():
     # Initialize analyzer with DORA document
-    dora_path = 'CELEX_32022R2554_EN_TXT.pdf'
-    analyzer = DORAComplianceAnalyzer(dora_path)
-    
-    # Extract technical standards
-    print("Extracting technical standards from DORA...")
-    analyzer.extract_technical_standards()
+    try:
+        dora_path = 'CELEX_32022R2554_EN_TXT.pdf'
+        analyzer = DORAComplianceAnalyzer(dora_path)
+        
+        # Extract technical standards
+        print("Extracting technical standards from DORA...")
+        analyzer.extract_technical_standards()
+    except Exception as e:
+        print(f"Error in main: {str(e)}")
+        raise
     
     # Define the folder containing policy documents
     policy_folder = 'policies'
