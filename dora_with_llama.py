@@ -452,57 +452,72 @@ class DORAComplianceAnalyzer:
         return area_statistics
 
     def _extract_and_clean_text(self) -> str:
-        """Extract and clean text and tables from PDF document."""
-        print("Extracting content from PDF...")
-
-        full_text = []
-        tables_data = []
-        current_table = None
-
+        """Extract and clean text from PDF document."""
         try:
+            print(f"Extracting text from: {self.dora_pdf_path}")
+            extracted_text = ""
+            tables_data = []
+            
             with pdfplumber.open(self.dora_pdf_path) as pdf:
                 for page_num, page in enumerate(pdf.pages, 1):
                     print(f"Processing page {page_num}/{len(pdf.pages)}")
-
-                    # Extract tables from the page
+                    
+                    # Extract tables first
                     tables = page.extract_tables()
-
                     if tables:
                         for table in tables:
-                            if current_table is not None:
-                                if len(table[0]) == len(current_table[0]):
-                                    current_table.extend(table[1:])
-                                    continue
-                                else:
-                                    self._process_completed_table(
-                                        current_table, tables_data
-                                    )
-                                    current_table = table
-                            else:
-                                current_table = table
-                    elif current_table is not None:
-                        self._process_completed_table(current_table, tables_data)
-                        current_table = None
-
-                    # Extract text
-                    text = page.extract_text()
-                    if text:
-                        text = self._remove_table_content_from_text(text, tables)
-                        full_text.append(text)
-
-                if current_table is not None:
-                    self._process_completed_table(current_table, tables_data)
-
-            combined_text = "\n".join(full_text)
-            if tables_data:
-                combined_text += "\n\nExtracted Tables:\n"
-                combined_text += self._format_tables_data(tables_data)
-
-            return self._clean_text(combined_text)
-
+                            if table:  # Skip empty tables
+                                self._process_completed_table(table, tables_data, page_num, page_num)
+                    
+                    # Extract and clean text
+                    page_text = page.extract_text() or ""
+                    cleaned_text = self._clean_text(page_text)
+                    
+                    # Remove table content from text to avoid duplication
+                    if tables:
+                        cleaned_text = self._remove_table_content_from_text(cleaned_text, tables)
+                    
+                    extracted_text += cleaned_text + "\n\n"
+            
+            print(f"Extracted {len(extracted_text)} characters of text")
+            return extracted_text
+            
         except Exception as e:
-            print(f"Error extracting content from PDF: {str(e)}")
-            return ""
+            print(f"Error extracting text: {str(e)}")
+            raise
+
+    def _clean_text(self, text: str) -> str:
+        """Clean and normalize text content."""
+        try:
+            if not text:
+                return ""
+            
+            # Convert to string if not already
+            text = str(text)
+            
+            # Basic cleaning
+            cleaned = text.strip()
+            
+            # Remove extra whitespace
+            cleaned = ' '.join(cleaned.split())
+            
+            # Remove special characters but keep essential punctuation
+            cleaned = re.sub(r'[^\w\s.,;:?!()\-\'\"]+', ' ', cleaned)
+            
+            # Normalize whitespace around punctuation
+            cleaned = re.sub(r'\s*([.,;:?!()\-])\s*', r'\1 ', cleaned)
+            
+            # Remove multiple spaces
+            cleaned = re.sub(r'\s+', ' ', cleaned)
+            
+            # Remove empty lines
+            cleaned = '\n'.join(line.strip() for line in cleaned.split('\n') if line.strip())
+            
+            return cleaned.strip()
+            
+        except Exception as e:
+            print(f"Error cleaning text: {str(e)}")
+            return text
 
     def _calculate_similarity(self, text1: str, text2: str) -> float:
         """Calculate similarity using both spaCy and Llama model."""
