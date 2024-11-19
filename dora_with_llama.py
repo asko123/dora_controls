@@ -1169,7 +1169,7 @@ Respond with the most appropriate area name only."""}
     def analyze_requirements_by_policy_area(self):
         """Perform detailed analysis of requirements by policy area."""
         print("\nPerforming detailed policy area analysis...")
-        
+
         analysis_results = defaultdict(lambda: {
             'requirements': [],
             'dependencies': set(),
@@ -1182,7 +1182,7 @@ Respond with the most appropriate area name only."""}
             'risk_level': None,
             'implementation_complexity': None
         })
-        
+
         # Analyze each requirement
         for article_num, reqs in self.rts_requirements.items():
             for req in reqs:
@@ -1194,7 +1194,7 @@ Respond with the most appropriate area name only."""}
                     'context': req.get('full_context', ''),
                     'analysis': self._analyze_single_requirement(req)
                 })
-        
+
         for article_num, reqs in self.its_requirements.items():
             for req in reqs:
                 area = req['policy_area']
@@ -1205,13 +1205,13 @@ Respond with the most appropriate area name only."""}
                     'context': req.get('full_context', ''),
                     'analysis': self._analyze_single_requirement(req)
                 })
-        
+
         # Calculate metrics and assess risk for each area
         for area, data in analysis_results.items():
             self._calculate_area_metrics(area, data)
             self._assess_area_risk(area, data)
             self._determine_implementation_complexity(area, data)
-        
+
         return analysis_results
 
     def _analyze_single_requirement(self, requirement):
