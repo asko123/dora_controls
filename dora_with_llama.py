@@ -8,342 +8,300 @@ from collections import defaultdict
 from pathlib import Path
 import difflib
 from transformers import pipeline
+from datetime import datetime
+from collections import Counter
 
 class DORAComplianceAnalyzer:
     def __init__(self, dora_pdf_path):
-        self.dora_pdf_path = dora_pdf_path
-        print("Loading spaCy and LLM models...")
-        self.nlp = spacy.load("en_core_web_lg")
-        
-        # Initialize Llama model
-        self.llm = pipeline(
+        """Initialize the analyzer with proper sequence."""
+        try:
+            print("Starting DORA Compliance Analyzer initialization...")
+            
+            # 1. Validate input
+            if not Path(dora_pdf_path).exists():
+                raise FileNotFoundError(f"DORA PDF not found at: {dora_pdf_path}")
+            self.dora_pdf_path = dora_pdf_path
+            
+            # 2. Initialize NLP components first (required for later steps)
+            print("Loading NLP models...")
+            self.nlp = self._initialize_nlp()
+            
+            # 3. Initialize LLM (required for analysis)
+            print("Loading LLM model...")
+            self.llm = self._initialize_llm()
+            
+            # 4. Initialize policy areas (core reference data)
+            print("Initializing policy areas...")
+            self.policy_areas = self._initialize_policy_areas()
+            
+            # 5. Extract and clean DORA text
+            print("Extracting DORA text...")
+            self.dora_text = self._extract_and_clean_text()
+            
+            # 6. Initialize storage structures
+            self.rts_requirements = defaultdict(list)
+            self.its_requirements = defaultdict(list)
+            self.policy_coverage = defaultdict(list)
+            
+            print("Initialization complete.")
+            
+        except Exception as e:
+            print(f"Error during initialization: {str(e)}")
+            raise
+
+    def _initialize_nlp(self):
+        """Initialize NLP with error handling."""
+        try:
+            return spacy.load("en_core_web_lg")
+        except OSError:
+            print("Downloading spaCy model...")
+            spacy.cli.download("en_core_web_lg")
+            return spacy.load("en_core_web_lg")
+
+    def _initialize_llm(self):
+        """Initialize LLM with proper configuration."""
+        return pipeline(
             "text-generation",
             model="meta-llama/Llama-3.2-3B-Instruct",
             torch_dtype=torch.bfloat16,
             device_map="auto",
+            max_length=2048,
+            temperature=0.1  # Lower temperature for more focused analysis
         )
-        
-        self.dora_text = self._extract_and_clean_text()
-        self.rts_requirements = defaultdict(list)
-        self.its_requirements = defaultdict(list)
-        self.policy_coverage = defaultdict(list)
-        
-        # Define key areas for policy matching
-        self.policy_areas = {
-            'authentication_security': [
-                'authentication', 'login', 'credentials', 'access control',
-                'authentication methods', 'multi-factor', 'password', 'identity verification',
-                'biometric', 'single sign-on', 'SSO', 'MFA', '2FA', 'two-factor',
-                'authentication factors', 'token authentication', 'oauth', 'SAML',
-                'federated authentication', 'authentication protocols', 'password policy',
-                'password complexity', 'authentication strength', 'authentication logs',
-                'authentication failure', 'brute force protection', 'session management',
-                'session timeout', 'authentication audit', 'strong authentication',
-                'identity provider', 'authentication service', 'authentication gateway',
-                'authentication server', 'authentication framework', 'authentication mechanism',
-                'authentication flow', 'authentication interface', 'authentication API',
-                'authentication plugin', 'authentication module', 'authentication library',
-                'authentication component', 'authentication configuration', 'authentication settings',
-                'authentication rules', 'authentication policy', 'authentication standard',
-                'authentication requirement', 'authentication control', 'authentication monitoring',
-                'authentication logging', 'authentication reporting', 'authentication metrics',
-                'authentication dashboard', 'authentication analytics', 'authentication intelligence',
-                'authentication insight'
-            ],
-            'cryptography': [
-                'cryptography', 'encryption', 'cryptographic controls', 'key management',
-                'digital signatures', 'certificates', 'PKI', 'cryptographic algorithms',
-                'TLS', 'SSL', 'HTTPS', 'symmetric encryption', 'asymmetric encryption',
-                'public key', 'private key', 'key rotation', 'key storage', 'HSM',
-                'hardware security module', 'certificate authority', 'CA', 'key ceremony',
-                'cryptographic protocols', 'cipher suites', 'hash functions', 'SHA',
-                'AES', 'RSA', 'elliptic curve', 'ECDSA', 'key derivation', 'PKCS',
-                'certificate management', 'certificate validation', 'revocation',
-                'cryptographic operations', 'secure key generation', 'random number generation',
-                'cryptographic module', 'cryptographic service', 'cryptographic provider',
-                'cryptographic library', 'cryptographic algorithm', 'cryptographic protocol',
-                'cryptographic standard', 'cryptographic requirement', 'cryptographic policy',
-                'cryptographic control', 'cryptographic monitoring', 'cryptographic logging',
-                'cryptographic reporting', 'cryptographic metrics', 'cryptographic dashboard',
-                'cryptographic analytics', 'cryptographic intelligence', 'cryptographic insight',
-                'key lifecycle', 'key backup', 'key recovery', 'key archival', 'key escrow',
-                'key distribution', 'key agreement', 'key exchange', 'key transport',
-                'key wrapping', 'key unwrapping', 'key verification', 'key validation',
-                'key compromise', 'key revocation', 'key destruction', 'key deletion'
-            ],
-            'data_protection': [
-                'data protection', 'data privacy', 'data classification', 'data handling',
-                'data security', 'information protection', 'data governance', 'data lifecycle',
-                'PII', 'sensitive data', 'confidential information', 'data retention',
-                'data disposal', 'data access', 'data transfer', 'data storage',
-                'data encryption', 'data masking', 'data anonymization', 'data pseudonymization',
-                'data minimization', 'data accuracy', 'data integrity', 'data availability',
-                'data backup', 'data recovery', 'data breach', 'data loss prevention',
-                'DLP', 'data mapping', 'data inventory', 'data flow', 'cross-border data',
-                'data sovereignty', 'data residency', 'data processing', 'GDPR',
-                'data subject rights', 'privacy impact assessment', 'DPIA',
-                'data classification policy', 'data handling procedure', 'data security control',
-                'data protection requirement', 'data privacy standard', 'data governance framework',
-                'data lifecycle management', 'data retention policy', 'data disposal procedure',
-                'data access control', 'data transfer security', 'data storage security',
-                'data encryption requirement', 'data masking policy', 'data anonymization standard',
-                'data pseudonymization procedure', 'data minimization principle', 'data accuracy check',
-                'data integrity control', 'data availability requirement', 'data backup policy',
-                'data recovery procedure', 'data breach response', 'data loss prevention system',
-                'data mapping exercise', 'data inventory management', 'data flow diagram',
-                'cross-border data transfer', 'data sovereignty requirement', 'data residency policy',
-                'data processing agreement', 'privacy impact assessment procedure'
-            ],
-            'incident_response': [
-                'incident response', 'incident handling', 'incident reporting',
-                'incident management', 'security incidents', 'breach response',
-                'incident investigation', 'incident recovery', 'incident detection',
-                'incident containment', 'incident eradication', 'incident documentation',
-                'incident classification', 'incident prioritization', 'incident escalation',
-                'incident notification', 'incident tracking', 'incident metrics',
-                'incident playbooks', 'incident response team', 'CSIRT', 'CERT',
-                'incident response plan', 'incident coordination', 'incident communication',
-                'post-incident analysis', 'lessons learned', 'root cause analysis',
-                'forensic analysis', 'digital forensics', 'incident timeline',
-                'incident evidence', 'chain of custody', 'incident remediation',
-                'incident response procedure', 'incident handling policy', 'incident reporting requirement',
-                'incident management system', 'security incident process', 'breach response plan',
-                'incident investigation procedure', 'incident recovery policy', 'incident detection system',
-                'incident containment strategy', 'incident eradication procedure', 'incident documentation standard',
-                'incident classification scheme', 'incident prioritization matrix', 'incident escalation procedure',
-                'incident notification policy', 'incident tracking system', 'incident metrics dashboard',
-                'incident playbook template', 'incident response team structure', 'CSIRT policy',
-                'CERT procedure', 'incident response plan review', 'incident coordination protocol',
-                'incident communication plan', 'post-incident analysis procedure', 'lessons learned process',
-                'root cause analysis methodology', 'forensic analysis procedure', 'digital forensics policy',
-                'incident timeline documentation', 'incident evidence handling', 'chain of custody procedure',
-                'incident remediation plan'
-            ],
-            'open_source': [
-                'open source software', 'third-party components', 'software dependencies',
-                'dependency management', 'component security', 'vulnerability scanning',
-                'license compliance', 'open source policy', 'component versioning',
-                'dependency updates', 'security patches', 'version control',
-                'source code review', 'code security analysis', 'dependency check',
-                'software composition analysis', 'SCA', 'component inventory',
-                'library management', 'package management', 'repository management',
-                'artifact management', 'build dependencies', 'runtime dependencies',
-                'development dependencies', 'test dependencies', 'production dependencies',
-                'dependency resolution', 'dependency conflict', 'dependency tree',
-                'dependency graph', 'dependency audit', 'dependency security',
-                'dependency vulnerability', 'dependency update', 'dependency patch'
-            ],
-            'production_access': [
-                'production access', 'privileged access', 'access management',
-                'production environment', 'administrative access', 'elevated privileges',
-                'production environment access', 'privileged access management', 'PAM',
-                'access control policy', 'production system access', 'administrative privileges',
-                'elevated access', 'emergency access', 'break-glass access', 'just-in-time access',
-                'temporary access', 'access review', 'access certification', 'access audit',
-                'access monitoring', 'access logging', 'access reporting', 'access metrics',
-                'access dashboard', 'access analytics', 'access intelligence', 'access insight',
-                'production support access', 'production maintenance access', 'production operations access',
-                'production deployment access', 'production release access', 'production change access',
-                'production incident access', 'production problem access', 'production emergency access'
-            ],
-            'asset_inventory': [
-                'asset inventory', 'asset management', 'technology assets',
-                'asset tracking', 'inventory control', 'asset lifecycle',
-                'asset registration', 'asset documentation',
-                'technology asset inventory', 'asset management system', 'asset tracking',
-                'asset lifecycle management', 'asset registration', 'asset documentation',
-                'asset classification', 'asset categorization', 'asset tagging',
-                'asset labeling', 'asset identification', 'asset discovery',
-                'asset scanning', 'asset monitoring', 'asset reporting',
-                'asset metrics', 'asset dashboard', 'asset analytics',
-                'asset intelligence', 'asset insight', 'asset audit',
-                'asset compliance', 'asset risk', 'asset security',
-                'asset vulnerability', 'asset patch', 'asset update',
-                'asset maintenance', 'asset support', 'asset warranty',
-                'asset contract', 'asset license', 'asset ownership',
-                'asset custodian', 'asset steward', 'asset administrator'
-            ],
-            'network_security': [
-                'network security', 'network platforms', 'network services',
-                'network infrastructure', 'connectivity', 'network architecture',
-                'network controls', 'network protection', 'firewall', 'IDS', 'IPS',
-                'network segmentation', 'VLAN', 'DMZ', 'network access control', 'NAC',
-                'network monitoring', 'network traffic analysis', 'packet inspection',
-                'network protocols', 'routing security', 'switching security',
-                'wireless security', 'WPA', 'network authentication', '802.1x',
-                'VPN', 'remote access', 'network encryption', 'network isolation',
-                'network zones', 'network documentation', 'network diagram',
-                'network inventory', 'network baseline', 'network hardening',
-                'network vulnerability', 'network penetration testing', 'network audit',
-                'network compliance', 'SDN', 'zero trust network',
-                'network access policy', 'network security standard', 'network protection requirement',
-                'firewall rule', 'IDS signature', 'IPS policy', 'network segmentation design',
-                'VLAN configuration', 'DMZ architecture', 'network access control policy',
-                'network monitoring requirement', 'traffic analysis procedure', 'packet inspection policy',
-                'protocol security', 'routing security policy', 'switching security standard',
-                'wireless security requirement', 'WPA configuration', 'network authentication policy',
-                '802.1x implementation', 'VPN configuration', 'remote access policy',
-                'network encryption standard', 'network isolation requirement', 'network zone design',
-                'network documentation standard', 'network diagram requirement', 'network inventory policy',
-                'network baseline configuration', 'network hardening standard', 'network vulnerability assessment',
-                'network penetration test', 'network audit requirement', 'network compliance standard',
-                'SDN implementation', 'zero trust architecture'
-            ],
-            'application_resiliency': [
-                'application availability', 'system resilience', 'service reliability',
-                'fault tolerance', 'high availability', 'disaster recovery',
-                'business continuity', 'service continuity', 'application recovery',
-                'system recovery', 'failover', 'failback', 'load balancing',
-                'redundancy', 'replication', 'backup', 'restore', 'recovery point objective',
-                'RPO', 'recovery time objective', 'RTO', 'business impact analysis',
-                'BIA', 'continuity planning', 'recovery planning', 'resilience testing',
-                'availability monitoring', 'performance monitoring', 'capacity planning',
-                'scalability', 'elasticity', 'auto-scaling', 'resource management',
-                'service level agreement', 'SLA', 'operational level agreement', 'OLA'
-            ],
-            'backup_restoration': [
-                'backup', 'restoration', 'data recovery', 'backup security',
-                'recovery procedures', 'backup management', 'restore testing',
-                'backup policy', 'restoration procedure', 'data recovery plan',
-                'backup security control', 'recovery procedure', 'backup management system',
-                'restore testing protocol', 'backup schedule', 'backup retention',
-                'backup verification', 'backup validation', 'backup monitoring',
-                'backup reporting', 'backup metrics', 'backup performance',
-                'backup capacity', 'backup storage', 'backup media',
-                'backup encryption', 'backup compression', 'backup deduplication',
-                'backup replication', 'backup archival', 'backup catalog',
-                'backup inventory', 'backup audit', 'backup compliance',
-                'backup security', 'backup access control', 'backup authentication',
-                'backup authorization', 'backup logging', 'backup monitoring'
-            ],
-            'datacenter_security': [
-                'datacenter security', 'physical security', 'environmental controls',
-                'facility security', 'datacenter operations', 'infrastructure security',
-                'physical security', 'environmental controls', 'facility security',
-                'datacenter operations', 'infrastructure security', 'access control',
-                'surveillance', 'monitoring', 'power management', 'cooling system',
-                'fire suppression', 'environmental monitoring', 'physical access',
-                'visitor management', 'security zones', 'perimeter security',
-                'badge access', 'biometric access', 'security guards',
-                'video surveillance', 'CCTV', 'alarm systems', 'emergency response',
-                'disaster recovery', 'business continuity', 'facility management',
-                'maintenance procedures', 'cleaning procedures', 'vendor access',
-                'loading dock', 'shipping area', 'receiving area',
-                'equipment installation', 'equipment removal', 'asset management'
-            ],
-            'entitlement_management': [
-                'entitlement management', 'access rights', 'permissions',
-                'role management', 'authorization', 'privilege management',
-                'access rights', 'permissions management', 'role management',
-                'authorization policy', 'privilege management', 'access control',
-                'role-based access', 'RBAC', 'attribute-based access', 'ABAC',
-                'policy-based access', 'access governance', 'access review',
-                'access certification', 'access audit', 'access monitoring',
-                'access reporting', 'access metrics', 'access dashboard',
-                'access analytics', 'access intelligence', 'access insight',
-                'entitlement review', 'entitlement certification', 'entitlement audit',
-                'entitlement monitoring', 'entitlement reporting', 'entitlement metrics',
-                'entitlement dashboard', 'entitlement analytics', 'entitlement intelligence'
-            ],
-            'identity_management': [
-                'identity management', 'user identity', 'identity lifecycle',
-                'identity governance', 'account management', 'identity controls',
-                'user identity', 'identity lifecycle', 'identity governance',
-                'account management', 'identity controls', 'identity provider',
-                'identity store', 'identity repository', 'identity directory',
-                'identity federation', 'identity synchronization', 'identity provisioning',
-                'identity deprovisioning', 'identity reconciliation', 'identity attestation',
-                'identity verification', 'identity validation', 'identity authentication',
-                'identity authorization', 'identity audit', 'identity compliance',
-                'identity security', 'identity risk', 'identity threat',
-                'identity protection', 'identity monitoring', 'identity analytics',
-                'identity intelligence', 'identity insight', 'identity metrics',
-                'identity dashboard', 'identity reporting', 'identity review'
-            ],
-            'patch_management': [
-                'patch management', 'security patches', 'system updates',
-                'patch deployment', 'vulnerability remediation', 'update management',
-                'patch testing', 'patch validation', 'patch verification',
-                'patch rollback', 'patch schedule', 'patch window',
-                'patch cycle', 'patch priority', 'patch classification',
-                'patch inventory', 'patch compliance', 'patch reporting',
-                'patch metrics', 'patch dashboard', 'patch analytics',
-                'patch intelligence', 'patch automation', 'patch distribution',
-                'patch installation', 'patch verification', 'patch documentation',
-                'patch history', 'patch audit', 'patch review',
-                'patch assessment', 'patch risk', 'patch impact',
-                'patch dependency'
-            ],
-            'vulnerability_management': [
-                'vulnerability management', 'security vulnerabilities', 'vulnerability assessment',
-                'security scanning', 'vulnerability remediation', 'security testing',
-                'vulnerability identification', 'vulnerability classification',
-                'vulnerability prioritization', 'vulnerability tracking', 'vulnerability reporting',
-                'vulnerability metrics', 'vulnerability dashboard', 'vulnerability analytics',
-                'vulnerability intelligence', 'vulnerability insight', 'vulnerability scan',
-                'vulnerability assessment', 'vulnerability test', 'vulnerability audit',
-                'vulnerability review', 'vulnerability monitoring', 'vulnerability management system',
-                'VMS', 'security information', 'security event management', 'SIEM',
-                'threat intelligence', 'threat detection', 'threat response',
-                'incident management', 'incident response', 'incident handling',
-                'security operations', 'SOC', 'security monitoring'
-            ],
-            'threat_intelligence': [
-                'threat intelligence', 'cyber threats', 'threat analysis',
-                'threat detection', 'threat monitoring', 'security intelligence',
-                'threat hunting', 'threat assessment', 'threat modeling',
-                'threat landscape', 'threat actor', 'threat vector',
-                'threat surface', 'threat indicator', 'indicator of compromise',
-                'IOC', 'threat feed', 'threat platform', 'threat sharing',
-                'threat response', 'threat mitigation', 'threat prevention',
-                'threat protection', 'threat defense', 'threat intelligence platform',
-                'TIP', 'cyber intelligence', 'security intelligence',
-                'intelligence sharing', 'intelligence analysis', 'intelligence reporting',
-                'intelligence dashboard', 'intelligence metrics', 'intelligence analytics'
-            ],
-            'system_monitoring': [
-                'system monitoring', 'performance monitoring', 'security monitoring',
-                'monitoring controls', 'alerts', 'monitoring tools',
-                'system metrics', 'performance metrics', 'security metrics',
-                'monitoring dashboard', 'monitoring analytics', 'monitoring intelligence',
-                'monitoring insight', 'system health', 'system performance',
-                'system availability', 'system capacity', 'system utilization',
-                'system resources', 'system logs', 'log management',
-                'log analysis', 'log monitoring', 'log correlation',
-                'log aggregation', 'log retention', 'log archival',
-                'log search', 'log review', 'log audit', 'log compliance',
-                'log security'
-            ],
-            'media_sanitization': [
-                'media sanitization', 'data destruction', 'secure disposal',
-                'media disposal', 'data wiping', 'secure erasure',
-                'data destruction', 'secure disposal', 'media disposal',
-                'data wiping', 'secure erasure', 'media destruction',
-                'physical destruction', 'degaussing', 'shredding',
-                'sanitization verification', 'sanitization validation', 'sanitization certification',
-                'disposal procedure', 'disposal policy', 'disposal standard',
-                'disposal requirement', 'disposal control', 'disposal monitoring',
-                'disposal logging', 'disposal reporting', 'disposal metrics',
-                'disposal dashboard', 'disposal analytics', 'disposal intelligence',
-                'disposal insight', 'media handling', 'media storage',
-                'media inventory', 'media tracking', 'media classification',
-                'media labeling', 'media protection', 'media security'
-            ],
-            'change_management': [
-                'change management', 'production change', 'change control',
-                'release management', 'change procedures', 'deployment management',
-                'change request', 'change ticket', 'change record',
-                'change documentation', 'change approval', 'change authorization',
-                'change implementation', 'change validation', 'change verification',
-                'change testing', 'change rollback', 'change window',
-                'change schedule', 'change calendar', 'change freeze',
-                'change blackout', 'emergency change', 'standard change',
-                'normal change', 'change advisory board', 'CAB',
-                'change management system', 'change tracking', 'change monitoring',
-                'change reporting', 'change metrics', 'change dashboard',
-                'change analytics'
-            ]
+
+    def _initialize_policy_areas(self):
+        """Initialize enhanced policy areas with weighted keywords."""
+        return {
+            'authentication_security': {
+                'primary_keywords': [
+                    'authentication', 'login', 'credentials', 'access control',
+                    'identity verification', 'multi-factor', 'MFA', '2FA',
+                    'authorization', 'identity management', 'privileged access'
+                ],
+                'secondary_keywords': [
+                    'password', 'biometric', 'token', 'security code',
+                    'authentication factor', 'identity provider', 'SSO',
+                    'single sign-on', 'access rights', 'user permissions'
+                ],
+                'context_phrases': [
+                    'user authentication process', 'secure access control',
+                    'authentication protocol implementation', 'identity management system',
+                    'access control mechanism', 'privileged access management'
+                ]
+            },
+            'cryptography_security': {
+                'primary_keywords': [
+                    'encryption', 'cryptographic', 'cipher', 'key management',
+                    'PKI', 'digital signature', 'hash', 'cryptographic controls',
+                    'key rotation', 'cryptographic algorithm'
+                ],
+                'secondary_keywords': [
+                    'AES', 'RSA', 'elliptic curve', 'ECDSA', 'key derivation',
+                    'PKCS', 'certificate', 'TLS', 'SSL', 'HSM', 
+                    'symmetric encryption', 'asymmetric encryption'
+                ],
+                'context_phrases': [
+                    'encryption implementation', 'key lifecycle management',
+                    'cryptographic protocol requirements', 'secure key generation',
+                    'cryptographic module validation', 'encryption at rest'
+                ]
+            },
+            'data_protection': {
+                'primary_keywords': [
+                    'data protection', 'privacy', 'GDPR', 'data security',
+                    'personal data', 'sensitive data', 'data processing',
+                    'data classification', 'data governance', 'data sovereignty'
+                ],
+                'secondary_keywords': [
+                    'data minimization', 'data retention', 'data disposal',
+                    'data handling', 'data transfer', 'data storage',
+                    'data anonymization', 'pseudonymization', 'data masking'
+                ],
+                'context_phrases': [
+                    'protection of personal data', 'data privacy requirements',
+                    'secure data processing', 'data protection measures',
+                    'data lifecycle management', 'privacy by design'
+                ]
+            },
+            'incident_response': {
+                'primary_keywords': [
+                    'incident response', 'security incident', 'breach response',
+                    'incident management', 'incident handling', 'CSIRT',
+                    'incident detection', 'incident investigation', 'SOC'
+                ],
+                'secondary_keywords': [
+                    'incident reporting', 'incident analysis', 'forensics',
+                    'incident recovery', 'incident containment', 'incident triage',
+                    'incident escalation', 'incident documentation'
+                ],
+                'context_phrases': [
+                    'incident response procedure', 'security incident handling',
+                    'breach notification requirements', 'incident management process',
+                    'security operations center', 'incident response team'
+                ]
+            },
+            'risk_management': {
+                'primary_keywords': [
+                    'risk management', 'risk assessment', 'risk analysis',
+                    'risk mitigation', 'risk treatment', 'risk framework',
+                    'risk appetite', 'risk tolerance', 'risk governance'
+                ],
+                'secondary_keywords': [
+                    'risk identification', 'risk evaluation', 'risk monitoring',
+                    'risk control', 'risk register', 'risk matrix',
+                    'risk acceptance', 'risk transfer', 'residual risk'
+                ],
+                'context_phrases': [
+                    'risk management framework', 'risk assessment process',
+                    'risk mitigation measures', 'risk control implementation',
+                    'enterprise risk management', 'risk reporting'
+                ]
+            },
+            'business_continuity': {
+                'primary_keywords': [
+                    'business continuity', 'disaster recovery', 'BCP',
+                    'DRP', 'service continuity', 'operational resilience',
+                    'business resilience', 'continuity planning'
+                ],
+                'secondary_keywords': [
+                    'recovery time objective', 'RTO', 'recovery point objective',
+                    'RPO', 'business impact analysis', 'BIA', 'contingency plan',
+                    'failover', 'backup strategy'
+                ],
+                'context_phrases': [
+                    'business continuity planning', 'disaster recovery procedures',
+                    'service continuity requirements', 'resilience measures',
+                    'recovery strategy implementation', 'continuity testing'
+                ]
+            },
+            'change_management': {
+                'primary_keywords': [
+                    'change management', 'change control', 'release management',
+                    'deployment management', 'configuration management',
+                    'change process', 'version control'
+                ],
+                'secondary_keywords': [
+                    'change request', 'change approval', 'change implementation',
+                    'release process', 'deployment process', 'rollback procedure',
+                    'configuration baseline', 'change documentation'
+                ],
+                'context_phrases': [
+                    'change management procedure', 'change control process',
+                    'release management requirements', 'deployment controls',
+                    'configuration management system', 'change advisory board'
+                ]
+            },
+            'vendor_management': {
+                'primary_keywords': [
+                    'vendor management', 'supplier management', 'third party',
+                    'outsourcing', 'service provider', 'contractor',
+                    'vendor assessment', 'supplier evaluation'
+                ],
+                'secondary_keywords': [
+                    'vendor risk', 'contract management', 'SLA', 
+                    'service level agreement', 'vendor compliance',
+                    'supplier audit', 'vendor performance', 'vendor security'
+                ],
+                'context_phrases': [
+                    'vendor management process', 'supplier assessment requirements',
+                    'third party risk management', 'outsourcing controls',
+                    'vendor due diligence', 'supplier relationship management'
+                ]
+            },
+            'asset_management': {
+                'primary_keywords': [
+                    'asset management', 'asset inventory', 'asset tracking',
+                    'asset lifecycle', 'asset register', 'asset classification',
+                    'asset ownership', 'critical assets'
+                ],
+                'secondary_keywords': [
+                    'asset valuation', 'asset disposal', 'asset maintenance',
+                    'asset monitoring', 'asset protection', 'asset controls',
+                    'asset documentation', 'asset audit'
+                ],
+                'context_phrases': [
+                    'asset management process', 'asset lifecycle management',
+                    'asset protection requirements', 'asset control implementation',
+                    'critical asset identification', 'asset inventory management'
+                ]
+            },
+            'compliance_monitoring': {
+                'primary_keywords': [
+                    'compliance monitoring', 'regulatory compliance', 'audit',
+                    'compliance assessment', 'compliance reporting', 'controls testing',
+                    'compliance framework', 'compliance program'
+                ],
+                'secondary_keywords': [
+                    'compliance review', 'compliance verification', 'control testing',
+                    'compliance documentation', 'compliance metrics', 'audit trail',
+                    'compliance evidence', 'control effectiveness'
+                ],
+                'context_phrases': [
+                    'compliance monitoring process', 'regulatory reporting requirements',
+                    'compliance assessment procedures', 'control testing methodology',
+                    'compliance program management', 'audit documentation'
+                ]
+            }
         }
+
+    def _validate_policy_areas(self):
+        """Validate policy areas structure and keywords."""
+        required_keys = {'primary_keywords', 'secondary_keywords', 'context_phrases'}
+        
+        for area, content in self.policy_areas.items():
+            # Check structure
+            if not all(key in content for key in required_keys):
+                raise ValueError(f"Missing required keys in policy area: {area}")
+            
+            # Validate keyword lists
+            for key in required_keys:
+                if not isinstance(content[key], list):
+                    raise TypeError(f"Keywords must be lists: {area}.{key}")
+                if not all(isinstance(k, str) for k in content[key]):
+                    raise TypeError(f"All keywords must be strings: {area}.{key}")
+            
+            # Check for duplicates
+            all_keywords = (
+                content['primary_keywords'] + 
+                content['secondary_keywords'] + 
+                content['context_phrases']
+            )
+            duplicates = [k for k, count in Counter(all_keywords).items() if count > 1]
+            if duplicates:
+                print(f"Warning: Duplicate keywords found in {area}: {duplicates}")
+
+    def process_dora_requirements(self):
+        """Main process to extract and analyze DORA requirements."""
+        print("\nStarting DORA requirements processing...")
+        
+        # Extract technical standards
+        requirements_count = self.extract_technical_standards()
+        print(f"\nExtracted {requirements_count} total requirements")
+        
+        # Analyze requirements by policy area
+        area_statistics = defaultdict(lambda: {'total': 0, 'rts': 0, 'its': 0})
+        
+        for article_num, reqs in self.rts_requirements.items():
+            for req in reqs:
+                area = req['policy_area']
+                area_statistics[area]['total'] += 1
+                area_statistics[area]['rts'] += 1
+        
+        for article_num, reqs in self.its_requirements.items():
+            for req in reqs:
+                area = req['policy_area']
+                area_statistics[area]['total'] += 1
+                area_statistics[area]['its'] += 1
+        
+        # Print area statistics
+        print("\nRequirements by Policy Area:")
+        for area, stats in area_statistics.items():
+            print(f"\n{area.replace('_', ' ').title()}:")
+            print(f"- Total Requirements: {stats['total']}")
+            print(f"- RTS Requirements: {stats['rts']}")
+            print(f"- ITS Requirements: {stats['its']}")
+        
+        return area_statistics
 
     def _extract_and_clean_text(self) -> str:
         """Extract and clean text and tables from PDF document."""
@@ -569,44 +527,116 @@ class DORAComplianceAnalyzer:
         return 'other'
 
     def _identify_policy_area(self, text: str) -> str:
-        """Identify the policy area based on content analysis with improved handling."""
+        """Identify the policy area with enhanced accuracy and logging."""
         try:
-            doc = self.nlp(text.lower())
-            area_scores = defaultdict(float)
+            print("\nAnalyzing policy area for text snippet...")
+            text = text.lower()
+            doc = self.nlp(text[:25000])  # Limit text length for processing
             
-            # Get non-empty sentences
-            sentences = [sent for sent in doc.sents if len(sent) > 0]
+            # Initialize area scores with debug information
+            area_scores = defaultdict(lambda: {
+                'score': 0.0,
+                'keyword_matches': [],
+                'context_score': 0.0
+            })
             
+            # Get meaningful sentences
+            sentences = [sent for sent in doc.sents if len(sent.text.strip()) > 10]
+            
+            if not sentences:
+                print("Warning: No meaningful sentences found in text")
+                return 'general'
+            
+            print(f"Analyzing {len(sentences)} sentences for policy area matching")
+            
+            # First pass: Keyword and semantic matching
             for area, keywords in self.policy_areas.items():
-                area_score = 0.0
-                keyword_matches = 0
+                print(f"\nAnalyzing area: {area}")
+                area_data = area_scores[area]
                 
                 for keyword in keywords:
                     keyword_doc = self.nlp(keyword)
-                    
-                    # Skip empty documents
                     if not keyword_doc.vector_norm:
                         continue
-                        
-                    # Compare with each sentence
+                    
                     for sent in sentences:
-                        if not sent.vector_norm:
-                            continue
                         try:
+                            # Calculate similarity
                             similarity = keyword_doc.similarity(sent)
-                            if similarity > 0.6:  # Threshold for keyword match
-                                area_score += similarity
-                                keyword_matches += 1
+                            
+                            if similarity > 0.6:  # Threshold for strong match
+                                area_data['score'] += similarity
+                                area_data['keyword_matches'].append({
+                                    'keyword': keyword,
+                                    'sentence': sent.text,
+                                    'similarity': similarity
+                                })
+                                print(f"Strong match found: '{keyword}' in '{sent.text[:100]}...' (similarity: {similarity:.3f})")
                         except Exception as e:
                             continue
-                
-                # Calculate final score considering both similarity and matches
-                if keyword_matches > 0:
-                    area_scores[area] = area_score / keyword_matches
             
-            # Return the area with highest score or 'general' if no good matches
-            if area_scores:
-                return max(area_scores.items(), key=lambda x: x[1])[0]
+            # Second pass: Context analysis using LLM
+            try:
+                # Prepare context for top scoring areas
+                top_areas = sorted(
+                    area_scores.items(),
+                    key=lambda x: x[1]['score'],
+                    reverse=True
+                )[:3]  # Consider top 3 candidates
+                
+                if top_areas:
+                    context_prompt = [
+                        {"role": "system", "content": "Analyze which policy area best matches the given text. Consider regulatory and technical context."},
+                        {"role": "user", "content": f"""
+Text: {text[:1000]}
+
+Candidate areas:
+{chr(10).join(f'- {area}' for area, _ in top_areas)}
+
+Respond with the most appropriate area name only."""}
+                    ]
+                    
+                    llm_response = self.llm(context_prompt, max_new_tokens=20)
+                    llm_area = llm_response[0]["generated_text"].strip().lower()
+                    
+                    # Add context score to matching area
+                    for area, _ in top_areas:
+                        if area.lower() in llm_area or llm_area in area.lower():
+                            area_scores[area]['context_score'] = 1.0
+                            print(f"LLM confirmed area: {area}")
+                            break
+            
+            except Exception as e:
+                print(f"LLM context analysis failed: {str(e)}")
+            
+            # Calculate final scores
+            final_scores = {}
+            for area, data in area_scores.items():
+                # Combine keyword matching score and context score
+                keyword_score = data['score'] / max(len(data['keyword_matches']), 1)
+                context_weight = 0.4  # Weight for LLM context analysis
+                final_scores[area] = (
+                    (1 - context_weight) * keyword_score +
+                    context_weight * data['context_score']
+                )
+            
+            # Get the best matching area
+            if final_scores:
+                best_area = max(final_scores.items(), key=lambda x: x[1])
+                print(f"\nSelected policy area: {best_area[0]} (score: {best_area[1]:.3f})")
+                
+                # Print detailed matching information
+                area_data = area_scores[best_area[0]]
+                if area_data['keyword_matches']:
+                    print("\nKey matches:")
+                    for match in area_data['keyword_matches'][:3]:  # Show top 3 matches
+                        print(f"- Keyword: '{match['keyword']}'")
+                        print(f"  In: '{match['sentence'][:100]}...'")
+                        print(f"  Similarity: {match['similarity']:.3f}")
+                
+                return best_area[0]
+            
+            print("No clear policy area identified, defaulting to 'general'")
             return 'general'
             
         except Exception as e:
@@ -614,90 +644,83 @@ class DORAComplianceAnalyzer:
             return 'general'
 
     def extract_technical_standards(self):
-        """Extract RTS and ITS requirements with enhanced precision."""
+        """Extract RTS and ITS requirements with enhanced detection and logging."""
+        print("\nStarting technical standards extraction...")
+        
         # More comprehensive patterns for RTS
         rts_patterns = [
             # Direct RTS references
-            r"RTS\s+(?:shall|should|must|will)\s+([^\.]+\.[^\.]+)",
-            
-            # Regulatory technical standards patterns
-            r"regulatory\s+technical\s+standards?\s*(?:shall|should|must|will)\s+([^\.]+\.[^\.]+)",
-            r"regulatory\s+technical\s+standards?\s*(?:to|that|which)\s+specify[^\.]+([^\.]+\.[^\.]+)",
-            r"regulatory\s+technical\s+standards?\s*(?:for|on|regarding)\s+([^\.]+\.[^\.]+)",
-            
-            # EBA/ESMA development patterns
-            r"(?:EBA|ESMA)\s+shall\s+develop\s+(?:draft\s+)?regulatory\s+technical\s+standards?\s+(?:to|that|which)\s+([^\.]+\.[^\.]+)",
-            r"(?:EBA|ESMA)\s+shall\s+specify[^\.]+through\s+regulatory\s+technical\s+standards?\s+([^\.]+\.[^\.]+)",
-            
-            # Mandate patterns
-            r"mandate\s+to\s+develop\s+regulatory\s+technical\s+standards?\s+(?:for|on)\s+([^\.]+\.[^\.]+)",
-            
-            # Specification patterns
-            r"specify\s+in\s+regulatory\s+technical\s+standards?\s+([^\.]+\.[^\.]+)",
-            
-            # Requirement patterns
+            r"(?:the\s+)?(?:RTS|regulatory\s+technical\s+standards?)\s+(?:shall|should|must|will|to|that|which)\s+([^\.]+\.[^\.]+)",
+            r"develop\s+(?:draft\s+)?regulatory\s+technical\s+standards?\s+(?:to|that|which|for|on)\s+([^\.]+\.[^\.]+)",
+            r"specify\s+(?:in|through)\s+(?:the\s+)?regulatory\s+technical\s+standards?\s+([^\.]+\.[^\.]+)",
             r"requirements?\s+(?:shall|should|must|will)\s+be\s+specified\s+in\s+regulatory\s+technical\s+standards?\s+([^\.]+\.[^\.]+)",
-            
-            # Detailed provisions
-            r"detailed\s+provisions?\s+(?:shall|should|must|will)\s+be\s+laid\s+down\s+in\s+regulatory\s+technical\s+standards?\s+([^\.]+\.[^\.]+)"
+            r"detailed\s+provisions?\s+(?:shall|should|must|will)\s+be\s+laid\s+down\s+in\s+regulatory\s+technical\s+standards?\s+([^\.]+\.[^\.]+)",
+            r"regulatory\s+technical\s+standards?\s+(?:shall|should|must|will)\s+specify[^\.]+([^\.]+\.[^\.]+)",
+            r"(?:EBA|ESMA)\s+shall\s+develop\s+(?:draft\s+)?regulatory\s+technical\s+standards?\s+([^\.]+\.[^\.]+)"
         ]
         
         # More comprehensive patterns for ITS
         its_patterns = [
             # Direct ITS references
-            r"ITS\s+(?:shall|should|must|will)\s+([^\.]+\.[^\.]+)",
-            
-            # Implementing technical standards patterns
-            r"implementing\s+technical\s+standards?\s*(?:shall|should|must|will)\s+([^\.]+\.[^\.]+)",
-            r"implementing\s+technical\s+standards?\s*(?:to|that|which)\s+specify[^\.]+([^\.]+\.[^\.]+)",
-            r"implementing\s+technical\s+standards?\s*(?:for|on|regarding)\s+([^\.]+\.[^\.]+)",
-            
-            # EBA/ESMA development patterns
-            r"(?:EBA|ESMA)\s+shall\s+develop\s+(?:draft\s+)?implementing\s+technical\s+standards?\s+(?:to|that|which)\s+([^\.]+\.[^\.]+)",
-            r"(?:EBA|ESMA)\s+shall\s+specify[^\.]+through\s+implementing\s+technical\s+standards?\s+([^\.]+\.[^\.]+)",
-            
-            # Implementation patterns
+            r"(?:the\s+)?(?:ITS|implementing\s+technical\s+standards?)\s+(?:shall|should|must|will|to|that|which)\s+([^\.]+\.[^\.]+)",
+            r"develop\s+(?:draft\s+)?implementing\s+technical\s+standards?\s+(?:to|that|which|for|on)\s+([^\.]+\.[^\.]+)",
+            r"specify\s+(?:in|through)\s+(?:the\s+)?implementing\s+technical\s+standards?\s+([^\.]+\.[^\.]+)",
             r"implement(?:ed|ing)?\s+through\s+implementing\s+technical\s+standards?\s+([^\.]+\.[^\.]+)",
-            
-            # Format patterns
             r"format\s+(?:shall|should|must|will)\s+be\s+specified\s+in\s+implementing\s+technical\s+standards?\s+([^\.]+\.[^\.]+)",
-            
-            # Uniform patterns
-            r"uniform\s+(?:format|templates|procedures|forms)\s+(?:shall|should|must|will)\s+be\s+specified\s+in\s+implementing\s+technical\s+standards?\s+([^\.]+\.[^\.]+)"
+            r"uniform\s+(?:format|templates|procedures|forms)\s+(?:shall|should|must|will)\s+be\s+specified\s+in\s+implementing\s+technical\s+standards?\s+([^\.]+\.[^\.]+)",
+            r"(?:EBA|ESMA)\s+shall\s+develop\s+(?:draft\s+)?implementing\s+technical\s+standards?\s+([^\.]+\.[^\.]+)"
         ]
 
         def extract_full_requirement(text, match_start, max_chars=1000):
-            """Extract the full requirement context around the match."""
-            # Find the start of the sentence containing the match
-            start = text.rfind('.', max(0, match_start - max_chars), match_start)
-            start = start + 1 if start != -1 else max(0, match_start - max_chars)
+            """Extract the full requirement context with improved boundary detection."""
+            # Find the start of the relevant section
+            start = max(0, match_start - max_chars)
+            temp_start = text.rfind('.', start, match_start)
+            if temp_start != -1:
+                start = temp_start + 1
             
-            # Find the end of the requirement (might span multiple sentences)
-            end = text.find('.', match_start)
-            next_end = text.find('.', end + 1)
-            while next_end != -1 and next_end - end < 100:  # Continue if sentences are closely related
-                end = next_end
-                next_end = text.find('.', end + 1)
+            # Find the end of the requirement
+            end = match_start + max_chars
+            temp_end = text.find('.', match_start)
+            while True:
+                next_end = text.find('.', temp_end + 1)
+                if next_end == -1 or next_end > end or next_end - temp_end > 200:
+                    break
+                temp_end = next_end
+            end = temp_end + 1 if temp_end != -1 else end
             
-            return text[start:end + 1].strip()
+            return text[start:end].strip()
 
         # Extract articles with enhanced pattern
-        article_pattern = r"Article\s+(\d+)\s*([^\n]+)\n(.*?)(?=Article\s+\d+|\Z)"
-        articles = re.finditer(article_pattern, self.dora_text, re.DOTALL)
+        article_pattern = r"Article\s+(\d+[a-z]?)\s*[–-]?\s*([^\n]+)(?:\n|\r\n?)(.*?)(?=Article\s+\d+[a-z]?|$)"
+        articles = re.finditer(article_pattern, self.dora_text, re.DOTALL | re.IGNORECASE)
+        
+        print("\nExtracting requirements from articles...")
+        articles_processed = 0
+        rts_found = 0
+        its_found = 0
         
         for article in articles:
+            articles_processed += 1
             article_num = article.group(1)
             article_title = article.group(2).strip()
             article_content = article.group(3).strip()
             
+            print(f"\nProcessing Article {article_num}: {article_title}")
+            
             # Identify policy area for the article
             article_area = self._identify_policy_area(f"{article_title} {article_content}")
+            print(f"Identified policy area: {article_area}")
             
             # Process RTS requirements
             for pattern in rts_patterns:
-                matches = re.finditer(pattern, article_content, re.IGNORECASE | re.DOTALL)
+                matches = re.finditer(pattern, article_content, re.IGNORECASE | re.MULTILINE)
                 for match in matches:
+                    rts_found += 1
                     full_requirement = extract_full_requirement(article_content, match.start())
+                    print(f"\nFound RTS requirement in Article {article_num}:")
+                    print(f"Requirement text: {match.group(1)[:200]}...")
+                    
                     requirement = {
                         'article_num': article_num,
                         'article_title': article_title,
@@ -711,9 +734,13 @@ class DORAComplianceAnalyzer:
             
             # Process ITS requirements
             for pattern in its_patterns:
-                matches = re.finditer(pattern, article_content, re.IGNORECASE | re.DOTALL)
+                matches = re.finditer(pattern, article_content, re.IGNORECASE | re.MULTILINE)
                 for match in matches:
+                    its_found += 1
                     full_requirement = extract_full_requirement(article_content, match.start())
+                    print(f"\nFound ITS requirement in Article {article_num}:")
+                    print(f"Requirement text: {match.group(1)[:200]}...")
+                    
                     requirement = {
                         'article_num': article_num,
                         'article_title': article_title,
@@ -724,6 +751,42 @@ class DORAComplianceAnalyzer:
                         'pattern_matched': pattern
                     }
                     self.its_requirements[article_num].append(requirement)
+        
+        # Summary statistics
+        total_rts = sum(len(reqs) for reqs in self.rts_requirements.values())
+        total_its = sum(len(reqs) for reqs in self.its_requirements.values())
+        
+        print("\nExtraction Summary:")
+        print(f"Articles processed: {articles_processed}")
+        print(f"RTS requirements found: {total_rts}")
+        print(f"ITS requirements found: {total_its}")
+        print(f"Total requirements: {total_rts + total_its}")
+        
+        if total_rts + total_its == 0:
+            print("\nWARNING: No requirements were found. This might indicate:")
+            print("1. The DORA text wasn't properly extracted")
+            print("2. The requirement patterns need adjustment")
+            print("3. The text format is unexpected")
+            
+            # Debug output
+            print("\nDebug Information:")
+            print(f"Text length: {len(self.dora_text)}")
+            print("First 500 characters of text:")
+            print(self.dora_text[:500])
+            
+            # Check for pattern matches in full text
+            print("\nChecking for basic pattern matches in full text:")
+            basic_patterns = [
+                r"RTS",
+                r"ITS",
+                r"regulatory\s+technical\s+standards?",
+                r"implementing\s+technical\s+standards?"
+            ]
+            for pattern in basic_patterns:
+                matches = re.findall(pattern, self.dora_text, re.IGNORECASE)
+                print(f"Pattern '{pattern}': {len(matches)} matches found")
+
+        return total_rts + total_its
 
     def analyze_policy_document(self, policy_pdf_path: str, policy_name: str):
         """Analyze a policy document and identify gaps."""
@@ -892,13 +955,17 @@ class DORAComplianceAnalyzer:
             return False
 
     def _analyze_requirements(self, policy_text: str, tables_data: List[Dict]) -> List[Dict]:
-        """Analyze requirements against policy content."""
+        """Analyze requirements against policy content with detailed coverage tracking."""
         coverage_results = []
         all_requirements = []
         
-        # Collect all requirements
+        print("\nStarting Detailed Requirements Analysis...")
+        
+        # Collect all requirements with detailed logging
         for article_num, requirements in self.rts_requirements.items():
+            print(f"\nProcessing RTS requirements from Article {article_num}")
             for req in requirements:
+                print(f"Found requirement: {req['requirement_text'][:100]}...")
                 all_requirements.append({
                     'article_num': article_num,
                     'requirement_type': 'RTS',
@@ -908,7 +975,9 @@ class DORAComplianceAnalyzer:
                 })
         
         for article_num, requirements in self.its_requirements.items():
+            print(f"\nProcessing ITS requirements from Article {article_num}")
             for req in requirements:
+                print(f"Found requirement: {req['requirement_text'][:100]}...")
                 all_requirements.append({
                     'article_num': article_num,
                     'requirement_type': 'ITS',
@@ -917,34 +986,69 @@ class DORAComplianceAnalyzer:
                     'policy_area': req['policy_area']
                 })
         
-        print(f"Analyzing {len(all_requirements)} requirements...")
+        total_reqs = len(all_requirements)
+        print(f"\nTotal requirements identified: {total_reqs}")
         
-        for req in all_requirements:
+        if total_reqs == 0:
+            print("WARNING: No requirements were extracted. Check the DORA text extraction.")
+            return coverage_results
+        
+        for idx, req in enumerate(all_requirements, 1):
+            print(f"\nAnalyzing requirement {idx}/{total_reqs}")
+            print(f"Article: {req['article_num']}, Type: {req['requirement_type']}")
+            print(f"Text: {req['requirement_text'][:200]}...")
+            
             try:
                 requirement_text = req['full_context'] or req['requirement_text']
                 
                 # Calculate similarity scores
                 text_similarity = self._calculate_similarity(requirement_text, policy_text)
+                print(f"Text similarity score: {text_similarity:.3f}")
                 
                 table_similarity = 0.0
                 if tables_data:
                     table_text = self._format_tables_data(tables_data)
                     table_similarity = self._calculate_similarity(requirement_text, table_text)
+                    print(f"Table similarity score: {table_similarity:.3f}")
                 
                 similarity_score = max(text_similarity, table_similarity)
+                
+                # Use LLM for context analysis
+                context_prompt = [
+                    {"role": "system", "content": "Analyze if the requirement is adequately addressed in the policy text. Consider regulatory compliance context."},
+                    {"role": "user", "content": f"Requirement: {requirement_text[:500]}\nPolicy Text: {policy_text[:500]}\nRespond with only a number between 0 and 1."}
+                ]
+                
+                try:
+                    llm_response = self.llm(context_prompt, max_new_tokens=10)
+                    context_score = float(re.search(r"([0-9]*[.])?[0-9]+", llm_response[0]["generated_text"]).group())
+                    context_score = max(0.0, min(1.0, context_score))
+                    print(f"LLM context score: {context_score:.3f}")
+                except Exception as e:
+                    print(f"LLM analysis failed: {str(e)}")
+                    context_score = 0.0
+                
+                # Combine scores with weights
+                final_score = (0.6 * similarity_score) + (0.4 * context_score)
+                is_covered = final_score > 0.35
                 
                 coverage_results.append({
                     'article_num': req['article_num'],
                     'requirement_type': req['requirement_type'],
                     'requirement_text': req['requirement_text'],
                     'full_context': req.get('full_context', ''),
-                    'covered': similarity_score > 0.35,  
-                    'similarity_score': similarity_score,
+                    'covered': is_covered,
+                    'similarity_score': final_score,
+                    'text_similarity': text_similarity,
+                    'table_similarity': table_similarity,
+                    'context_score': context_score,
                     'policy_area': req['policy_area']
                 })
                 
+                print(f"Final score: {final_score:.3f} - {'Covered' if is_covered else 'Not covered'}")
+                
             except Exception as e:
-                print(f"Error analyzing requirement from Article {req['article_num']}: {str(e)}")
+                print(f"Error analyzing requirement: {str(e)}")
                 coverage_results.append({
                     'article_num': req['article_num'],
                     'requirement_type': req['requirement_type'],
@@ -952,271 +1056,92 @@ class DORAComplianceAnalyzer:
                     'full_context': req.get('full_context', ''),
                     'covered': False,
                     'similarity_score': 0.0,
-                    'policy_area': req['policy_area'],
-                    'error': str(e)
+                    'error': str(e),
+                    'policy_area': req['policy_area']
                 })
         
         return coverage_results
 
-    def _print_analysis_summary(self, policy_name: str, coverage_results: List[Dict]):
-        """Print analysis summary."""
-        covered = len([r for r in coverage_results if r['covered']])
-        gaps = len([r for r in coverage_results if not r['covered']])
-        total = len(coverage_results)
-        
-        print("\nAnalysis Summary for", policy_name)
-        print("=" * 40)
-        print(f"Total Requirements: {total}")
-        print(f"Covered Requirements: {covered}")
-        print(f"Gaps Identified: {gaps}")
-        if total > 0:
-            coverage_percentage = (covered / total) * 100
-            print(f"Coverage Percentage: {coverage_percentage:.1f}%")
-
-    def _calculate_similarity(self, text1: str, text2: str) -> float:
-        """Calculate similarity between two texts using both cosine and semantic similarity."""
-        try:
-            # Process both texts with spaCy
-            doc1 = self.nlp(text1[:25000])  # Limit text length
-            doc2 = self.nlp(text2[:25000])
-            
-            # Get non-empty sentences
-            sents1 = [sent.text for sent in doc1.sents if len(sent) > 0]
-            sents2 = [sent.text for sent in doc2.sents if len(sent) > 0]
-            
-            if not sents1 or not sents2:
-                return 0.0
-            
-            # Calculate cosine similarity
-            cosine_sim = 0.0
-            for sent1 in doc1.sents:
-                if not sent1.vector_norm:
-                    continue
-                for sent2 in doc2.sents:
-                    if not sent2.vector_norm:
-                        continue
-                    try:
-                        sim = sent1.similarity(sent2)
-                        cosine_sim = max(cosine_sim, sim)
-                    except Exception:
-                        continue
-            
-            # Calculate semantic similarity using word overlap
-            def get_words(text):
-                return set(word.lower() for word in text.split() if len(word) > 2)
-            
-            words1 = set()
-            words2 = set()
-            for sent in sents1:
-                words1.update(get_words(sent))
-            for sent in sents2:
-                words2.update(get_words(sent))
-            
-            if not words1 or not words2:
-                return cosine_sim
-            
-            # Jaccard similarity for word overlap
-            intersection = len(words1.intersection(words2))
-            union = len(words1.union(words2))
-            semantic_sim = intersection / union if union > 0 else 0
-            
-            # Combine similarities (weighted average)
-            combined_sim = (0.7 * cosine_sim) + (0.3 * semantic_sim)
-            
-            return combined_sim
-            
-        except Exception as e:
-            print(f"Error in similarity calculation: {str(e)}")
-            return 0.0
-
-    def _calculate_header_similarity(self, header1, header2):
-        """Calculate similarity between two table headers."""
-        if not header1 or not header2:
-            return 0.0
-        
-        # Clean and normalize headers
-        clean_header1 = [str(cell).strip().lower() for cell in header1 if cell]
-        clean_header2 = [str(cell).strip().lower() for cell in header2 if cell]
-        
-        # Calculate similarity using fuzzy matching
-        matches = 0
-        total = max(len(clean_header1), len(clean_header2))
-        
-        for h1 in clean_header1:
-            for h2 in clean_header2:
-                # Use similarity ratio from difflib
-                similarity = difflib.SequenceMatcher(None, h1, h2).ratio()
-                if similarity > 0.8:  # High similarity threshold
-                    matches += 1
-                    break
-        
-        return matches / total if total > 0 else 0.0
-
-    def _remove_table_content_from_text_enhanced(self, text: str, tables: List[List[List[str]]]) -> str:
-        """Enhanced removal of table content from extracted text."""
-        if not tables:
-            return text
-        
-        # Create a set of table content with variations
-        table_content = set()
-        for table in tables:
-            for row in table:
-                for cell in row:
-                    if not isinstance(cell, str):
-                        cell = str(cell)
-                    cell = cell.strip()
-                    if cell:
-                        # Add original cell content
-                        table_content.add(cell)
-                        # Add lowercase version
-                        table_content.add(cell.lower())
-                        # Add without extra spaces
-                        table_content.add(' '.join(cell.split()))
-        
-        # Split text into lines and process each line
-        lines = text.split('\n')
-        cleaned_lines = []
-        
-        for line in lines:
-            line = line.strip()
-            if not line:
-                continue
-            
-            # Check if line contains table content
-            should_keep = True
-            for content in table_content:
-                # Use fuzzy matching for more accurate detection
-                if content and len(content) > 3:  # Ignore very short content
-                    if difflib.SequenceMatcher(None, line.lower(), content.lower()).ratio() > 0.8:
-                        should_keep = False
-                        break
-            
-            if should_keep:
-                cleaned_lines.append(line)
-        
-        return '\n'.join(cleaned_lines)
-
-    def _process_completed_table(self, table: List[List[str]], tables_data: List[Dict], 
-                                       start_page: int, end_page: int) -> None:
-        """Process a completed table with page information."""
-        try:
-            # Remove empty rows and clean cell content
-            cleaned_table = [
-                [self._clean_cell_content(cell) for cell in row]
-                for row in table
-                if any(cell.strip() for cell in row)
-            ]
-            
-            if not cleaned_table:
-                return
-            
-            # Create DataFrame
-            df = pd.DataFrame(cleaned_table[1:], columns=cleaned_table[0])
-            
-            # Store table data with metadata
-            tables_data.append({
-                'data': df,
-                'header': cleaned_table[0],
-                'num_rows': len(df),
-                'num_cols': len(df.columns),
-                'start_page': start_page,
-                'end_page': end_page
-            })
-            
-            print(f"Processed table: {len(df)} rows, {len(df.columns)} columns, "
-                  f"pages {start_page}-{end_page}")
-        
-        except Exception as e:
-            print(f"Error processing table: {str(e)}")
-
     def generate_gap_analysis_report(self):
-        """Generate a detailed gap analysis report with LLM insights."""
+        """Generate a comprehensive analysis report showing both coverage and gaps."""
         output = []
         
-        output.append("DORA Compliance Gap Analysis Report")
+        output.append("DORA Compliance Analysis Report")
         output.append("=" * 50 + "\n")
         
-        # Track overall statistics
         total_requirements = 0
+        total_covered = 0
         total_gaps = 0
         
-        # Debug logging
-        print("\nGenerating Analysis Report:")
-        print(f"Number of policies analyzed: {len(self.policy_coverage)}")
+        print("\nGenerating Comprehensive Analysis Report")
         
-        # Analyze gaps for each policy
         for policy_name, coverage in self.policy_coverage.items():
+            covered_items = [item for item in coverage if item['covered']]
+            gap_items = [item for item in coverage if not item['covered']]
+            
             print(f"\nPolicy: {policy_name}")
-            print(f"Requirements found: {len(coverage)}")
-            gaps = [item for item in coverage if not item['covered']]
-            print(f"Gaps found: {len(gaps)}")
+            print(f"Total requirements: {len(coverage)}")
+            print(f"Covered requirements: {len(covered_items)}")
+            print(f"Gaps identified: {len(gap_items)}")
             
             output.append(f"\nPolicy Document: {policy_name}")
-            output.append("-" * 30 + "\n")
+            output.append("-" * 30)
             
             # Group by policy area
-            area_gaps = defaultdict(list)
+            area_coverage = defaultdict(lambda: {'covered': [], 'gaps': []})
             for item in coverage:
-                if not item['covered']:
-                    area_gaps[item['policy_area']].append(item)
+                if item['covered']:
+                    area_coverage[item['policy_area']]['covered'].append(item)
+                else:
+                    area_coverage[item['policy_area']]['gaps'].append(item)
             
-            # Get LLM insights for each policy area
-            for area, gaps in area_gaps.items():
+            for area, items in area_coverage.items():
                 output.append(f"\nPolicy Area: {area.replace('_', ' ').title()}")
-                output.append(f"Number of gaps identified: {len(gaps)}")
+                output.append(f"Coverage Statistics:")
+                output.append(f"- Requirements Covered: {len(items['covered'])}")
+                output.append(f"- Gaps Identified: {len(items['gaps'])}")
                 
-                # Get LLM insight for the policy area
-                area_summary_prompt = [
-                    {"role": "system", "content": "Analyze the compliance gaps in this policy area and provide a brief summary of the main issues:"},
-                    {"role": "user", "content": f"Policy Area: {area}\nNumber of Gaps: {len(gaps)}\nGap Details: {[g['requirement_text'][:200] for g in gaps][:3]}"}
-                ]
+                if items['covered']:
+                    output.append("\nCovered Requirements:")
+                    for item in items['covered']:
+                        output.append(f"\nArticle {item['article_num']}:")
+                        output.append(f"Type: {item['requirement_type']}")
+                        output.append(f"Requirement: {item['requirement_text'][:200]}...")
+                        output.append(f"Coverage Score: {item['similarity_score']:.2f}")
+                        if 'text_similarity' in item:
+                            output.append(f"- Text Similarity: {item['text_similarity']:.2f}")
+                            output.append(f"- Table Similarity: {item['table_similarity']:.2f}")
+                            output.append(f"- Context Score: {item['context_score']:.2f}")
                 
-                try:
-                    area_insight = self.llm(area_summary_prompt, max_new_tokens=100)[0]["generated_text"]
-                    output.append(f"\nAnalysis Insight: {area_insight.strip()}\n")
-                except Exception as e:
-                    print(f"Error getting LLM insight for {area}: {str(e)}")
+                if items['gaps']:
+                    output.append("\nGaps Identified:")
+                    for item in items['gaps']:
+                        output.append(f"\nArticle {item['article_num']}:")
+                        output.append(f"Type: {item['requirement_type']}")
+                        output.append(f"Requirement: {item['requirement_text'][:200]}...")
+                        output.append(f"Coverage Score: {item['similarity_score']:.2f}")
+                        if 'text_similarity' in item:
+                            output.append(f"- Text Similarity: {item['text_similarity']:.2f}")
+                            output.append(f"- Table Similarity: {item['table_similarity']:.2f}")
+                            output.append(f"- Context Score: {item['context_score']:.2f}")
                 
-                for gap in gaps:
-                    output.append(f"\nArticle {gap['article_num']}:")
-                    output.append(f"Requirement Type: {gap['requirement_type']}")
-                    output.append("Requirement:")
-                    output.append(f"- {gap['requirement_text']}")
-                    if gap.get('full_context'):
-                        output.append("\nFull Context:")
-                        output.append(f"- {gap['full_context']}")
-                    output.append(f"Similarity Score: {gap['similarity_score']:.2f}")
-                    if 'error' in gap:
-                        output.append(f"Analysis Error: {gap['error']}")
-                    output.append("")
-                
-                total_gaps += len(gaps)
-                output.append("-" * 30 + "\n")
+                output.append("-" * 30)
             
             total_requirements += len(coverage)
+            total_covered += len(covered_items)
+            total_gaps += len(gap_items)
         
-        # Add summary statistics with LLM insights
-        output.insert(2, f"\nOverall Statistics:")
+        # Overall statistics
+        output.insert(2, "\nOverall Analysis Statistics:")
         output.insert(3, f"Total Requirements Analyzed: {total_requirements}")
-        output.insert(4, f"Total Gaps Identified: {total_gaps}")
+        output.insert(4, f"Requirements Covered: {total_covered}")
+        output.insert(5, f"Gaps Identified: {total_gaps}")
         
         if total_requirements > 0:
-            coverage_percentage = ((total_requirements - total_gaps) / total_requirements * 100)
-            output.insert(5, f"Overall Coverage: {coverage_percentage:.1f}%")
-            
-            # Get overall LLM insight
-            overall_prompt = [
-                {"role": "system", "content": "Provide a brief executive summary of the DORA compliance analysis:"},
-                {"role": "user", "content": f"Total Requirements: {total_requirements}\nGaps: {total_gaps}\nCoverage: {coverage_percentage:.1f}%"}
-            ]
-            
-            try:
-                overall_insight = self.llm(overall_prompt, max_new_tokens=150)[0]["generated_text"]
-                output.insert(6, f"\nExecutive Summary: {overall_insight.strip()}\n")
-            except Exception as e:
-                print(f"Error getting overall LLM insight: {str(e)}")
+            coverage_percentage = (total_covered / total_requirements * 100)
+            output.insert(6, f"Overall Coverage: {coverage_percentage:.1f}%\n")
         else:
-            output.insert(5, "Overall Coverage: N/A (no requirements analyzed)\n")
+            output.insert(6, "Overall Coverage: N/A (no requirements analyzed)\n")
         
         return "\n".join(output)
     
@@ -1229,6 +1154,603 @@ class DORAComplianceAnalyzer:
         except Exception as e:
             print(f"Error cleaning text: {str(e)}")
             return text
+
+    def analyze_requirements_by_policy_area(self):
+        """Perform detailed analysis of requirements by policy area."""
+        print("\nPerforming detailed policy area analysis...")
+        
+        analysis_results = defaultdict(lambda: {
+            'requirements': [],
+            'dependencies': set(),
+            'coverage_metrics': {
+                'total': 0,
+                'covered': 0,
+                'partial': 0,
+                'gaps': 0
+            },
+            'risk_level': None,
+            'implementation_complexity': None
+        })
+        
+        # Analyze each requirement
+        for article_num, reqs in self.rts_requirements.items():
+            for req in reqs:
+                area = req['policy_area']
+                analysis_results[area]['requirements'].append({
+                    'type': 'RTS',
+                    'article': article_num,
+                    'text': req['requirement_text'],
+                    'context': req.get('full_context', ''),
+                    'analysis': self._analyze_single_requirement(req)
+                })
+        
+        for article_num, reqs in self.its_requirements.items():
+            for req in reqs:
+                area = req['policy_area']
+                analysis_results[area]['requirements'].append({
+                    'type': 'ITS',
+                    'article': article_num,
+                    'text': req['requirement_text'],
+                    'context': req.get('full_context', ''),
+                    'analysis': self._analyze_single_requirement(req)
+                })
+        
+        # Calculate metrics and assess risk for each area
+        for area, data in analysis_results.items():
+            self._calculate_area_metrics(area, data)
+            self._assess_area_risk(area, data)
+            self._determine_implementation_complexity(area, data)
+        
+        return analysis_results
+
+    def _analyze_single_requirement(self, requirement):
+        """Analyze a single requirement in detail."""
+        try:
+            # Prepare requirement text for analysis
+            req_text = requirement.get('full_context', requirement['requirement_text'])
+            
+            # Use LLM for detailed analysis
+            analysis_prompt = [
+                {"role": "system", "content": "Analyze this regulatory requirement and provide structured insights:"},
+                {"role": "user", "content": f"Requirement: {req_text}\n\nProvide analysis of:\n1. Key controls needed\n2. Technical implications\n3. Implementation challenges"}
+            ]
+            
+            llm_response = self.llm(analysis_prompt, max_new_tokens=200)
+            analysis_text = llm_response[0]["generated_text"]
+            
+            # Extract key components from analysis
+            controls = re.findall(r"Key controls:(.*?)(?=Technical implications:|$)", analysis_text, re.DOTALL)
+            technical = re.findall(r"Technical implications:(.*?)(?=Implementation challenges:|$)", analysis_text, re.DOTALL)
+            challenges = re.findall(r"Implementation challenges:(.*?)$", analysis_text, re.DOTALL)
+            
+            return {
+                'key_controls': controls[0].strip() if controls else "",
+                'technical_implications': technical[0].strip() if technical else "",
+                'implementation_challenges': challenges[0].strip() if challenges else "",
+                'complexity_score': self._calculate_complexity_score(analysis_text),
+                'dependencies': self._identify_dependencies(req_text)
+            }
+            
+        except Exception as e:
+            print(f"Error in requirement analysis: {str(e)}")
+            return {
+                'error': str(e),
+                'complexity_score': 0,
+                'dependencies': []
+            }
+
+    def _identify_dependencies(self, requirement_text):
+        """Identify dependencies between requirements."""
+        dependencies = []
+        
+        # Look for references to other articles
+        article_refs = re.findall(r"Article\s+(\d+[a-z]?)", requirement_text)
+        
+        # Look for related technical standards
+        for article_num in article_refs:
+            # Check RTS requirements
+            if article_num in self.rts_requirements:
+                dependencies.extend([
+                    {
+                        'type': 'RTS',
+                        'article': article_num,
+                        'requirement': req['requirement_text'][:100]
+                    }
+                    for req in self.rts_requirements[article_num]
+                ])
+            
+            # Check ITS requirements
+            if article_num in self.its_requirements:
+                dependencies.extend([
+                    {
+                        'type': 'ITS',
+                        'article': article_num,
+                        'requirement': req['requirement_text'][:100]
+                    }
+                    for req in self.its_requirements[article_num]
+                ])
+        
+        return dependencies
+
+    def generate_dependency_graph(self):
+        """Generate a visualization of requirement dependencies."""
+        try:
+            import networkx as nx
+            import matplotlib.pyplot as plt
+            
+            G = nx.DiGraph()
+            
+            # Add nodes for each requirement
+            for article_num, reqs in self.rts_requirements.items():
+                for req in reqs:
+                    node_id = f"RTS-{article_num}"
+                    G.add_node(node_id, type='RTS', area=req['policy_area'])
+            
+            for article_num, reqs in self.its_requirements.items():
+                for req in reqs:
+                    node_id = f"ITS-{article_num}"
+                    G.add_node(node_id, type='ITS', area=req['policy_area'])
+            
+            # Add edges for dependencies
+            for article_num, reqs in self.rts_requirements.items():
+                for req in reqs:
+                    source = f"RTS-{article_num}"
+                    for dep in self._identify_dependencies(req['requirement_text']):
+                        target = f"{dep['type']}-{dep['article']}"
+                        if target in G:
+                            G.add_edge(source, target)
+            
+            # Create visualization
+            plt.figure(figsize=(15, 10))
+            pos = nx.spring_layout(G)
+            
+            # Draw nodes
+            nx.draw_networkx_nodes(G, pos, 
+                                 node_color='lightblue',
+                                 node_size=1000)
+            
+            # Draw edges
+            nx.draw_networkx_edges(G, pos, 
+                                 edge_color='gray',
+                                 arrows=True)
+            
+            # Add labels
+            nx.draw_networkx_labels(G, pos)
+            
+            plt.title("DORA Requirements Dependency Graph")
+            plt.axis('off')
+            
+            # Save the graph
+            plt.savefig('dora_dependencies.png')
+            plt.close()
+            
+            return G
+            
+        except Exception as e:
+            print(f"Error generating dependency graph: {str(e)}")
+            return None
+
+    def generate_gap_analysis_visualization(self):
+        """Generate visualizations for gap analysis."""
+        try:
+            import matplotlib.pyplot as plt
+            import seaborn as sns
+            
+            # Prepare data for visualization
+            areas = []
+            covered = []
+            partial = []
+            gaps = []
+            
+            for area, data in self.policy_coverage.items():
+                areas.append(area.replace('_', ' ').title())
+                
+                total_reqs = len(data)
+                covered_reqs = len([r for r in data if r['covered']])
+                partial_reqs = len([r for r in data if r.get('partial_coverage', False)])
+                gap_reqs = total_reqs - covered_reqs - partial_reqs
+                
+                covered.append(covered_reqs)
+                partial.append(partial_reqs)
+                gaps.append(gap_reqs)
+            
+            # Create stacked bar chart
+            plt.figure(figsize=(15, 8))
+            
+            bar_width = 0.35
+            index = range(len(areas))
+            
+            plt.bar(index, covered, bar_width, label='Covered', color='green', alpha=0.7)
+            plt.bar(index, partial, bar_width, bottom=covered, label='Partial', color='yellow', alpha=0.7)
+            plt.bar(index, gaps, bar_width, bottom=[i+j for i,j in zip(covered, partial)], 
+                   label='Gaps', color='red', alpha=0.7)
+            
+            plt.xlabel('Policy Areas')
+            plt.ylabel('Number of Requirements')
+            plt.title('DORA Compliance Gap Analysis')
+            plt.xticks(index, areas, rotation=45, ha='right')
+            plt.legend()
+            
+            plt.tight_layout()
+            plt.savefig('dora_gap_analysis.png')
+            plt.close()
+            
+            # Create heatmap of coverage
+            coverage_matrix = []
+            for area in areas:
+                area_data = self.policy_coverage[area.lower().replace(' ', '_')]
+                coverage_row = []
+                for req in area_data:
+                    if req['covered']:
+                        coverage_row.append(1)
+                    elif req.get('partial_coverage', False):
+                        coverage_row.append(0.5)
+                    else:
+                        coverage_row.append(0)
+                coverage_matrix.append(coverage_row)
+            
+            plt.figure(figsize=(12, 8))
+            sns.heatmap(coverage_matrix, 
+                       xticklabels=False,
+                       yticklabels=areas,
+                       cmap='RdYlGn',
+                       cbar_kws={'label': 'Coverage Level'})
+            
+            plt.title('DORA Requirements Coverage Heatmap')
+            plt.tight_layout()
+            plt.savefig('dora_coverage_heatmap.png')
+            plt.close()
+            
+        except Exception as e:
+            print(f"Error generating visualizations: {str(e)}")
+
+    def _assess_implementation_complexity(self, requirement):
+        """Assess the implementation complexity of a requirement."""
+        try:
+            # Prepare analysis prompt
+            complexity_prompt = [
+                {"role": "system", "content": """
+                Analyze the implementation complexity of this regulatory requirement.
+                Consider:
+                1. Technical complexity
+                2. Resource requirements
+                3. Dependencies
+                4. Timeline implications
+                5. Operational impact
+                
+                Rate each factor 1-5 and provide brief justification.
+                """},
+                {"role": "user", "content": f"Requirement: {requirement['requirement_text']}"}
+            ]
+            
+            analysis = self.llm(complexity_prompt, max_new_tokens=200)[0]["generated_text"]
+            
+            # Extract scores and calculate weighted complexity
+            scores = {
+                'technical': self._extract_score(analysis, 'Technical complexity'),
+                'resources': self._extract_score(analysis, 'Resource requirements'),
+                'dependencies': self._extract_score(analysis, 'Dependencies'),
+                'timeline': self._extract_score(analysis, 'Timeline'),
+                'impact': self._extract_score(analysis, 'Operational impact')
+            }
+            
+            # Calculate weighted score
+            weights = {
+                'technical': 0.3,
+                'resources': 0.2,
+                'dependencies': 0.2,
+                'timeline': 0.15,
+                'impact': 0.15
+            }
+            
+            complexity_score = sum(scores[k] * weights[k] for k in scores)
+            
+            return {
+                'score': complexity_score,
+                'details': scores,
+                'analysis': analysis,
+                'complexity_level': self._categorize_complexity(complexity_score)
+            }
+            
+        except Exception as e:
+            print(f"Error in complexity assessment: {str(e)}")
+            return {'score': 0, 'error': str(e)}
+
+    def _calculate_risk_level(self, requirement, complexity_data):
+        """Calculate the risk level for a requirement."""
+        try:
+            # Prepare risk analysis prompt
+            risk_prompt = [
+                {"role": "system", "content": """
+                Analyze the risk implications of this regulatory requirement.
+                Consider:
+                1. Compliance risk
+                2. Operational risk
+                3. Reputational risk
+                4. Financial risk
+                5. Security risk
+                
+                Rate each risk 1-5 and provide justification.
+                """},
+                {"role": "user", "content": f"""
+                Requirement: {requirement['requirement_text']}
+                Implementation Complexity: {complexity_data['complexity_level']}
+                """}
+            ]
+            
+            risk_analysis = self.llm(risk_prompt, max_new_tokens=200)[0]["generated_text"]
+            
+            # Extract risk scores
+            risk_scores = {
+                'compliance': self._extract_score(risk_analysis, 'Compliance risk'),
+                'operational': self._extract_score(risk_analysis, 'Operational risk'),
+                'reputational': self._extract_score(risk_analysis, 'Reputational risk'),
+                'financial': self._extract_score(risk_analysis, 'Financial risk'),
+                'security': self._extract_score(risk_analysis, 'Security risk')
+            }
+            
+            # Calculate weighted risk score
+            risk_weights = {
+                'compliance': 0.3,
+                'operational': 0.2,
+                'reputational': 0.15,
+                'financial': 0.15,
+                'security': 0.2
+            }
+            
+            risk_score = sum(risk_scores[k] * risk_weights[k] for k in risk_scores)
+            
+            return {
+                'score': risk_score,
+                'details': risk_scores,
+                'analysis': risk_analysis,
+                'risk_level': self._categorize_risk(risk_score)
+            }
+            
+        except Exception as e:
+            print(f"Error in risk calculation: {str(e)}")
+            return {'score': 0, 'error': str(e)}
+
+    def generate_detailed_report(self):
+        """Generate a comprehensive analysis report."""
+        try:
+            report_sections = []
+            
+            # Executive Summary
+            report_sections.append(self._generate_executive_summary())
+            
+            # Detailed Analysis by Policy Area
+            report_sections.append(self._generate_policy_area_analysis())
+            
+            # Risk and Complexity Assessment
+            report_sections.append(self._generate_risk_complexity_analysis())
+            
+            # Gap Analysis
+            report_sections.append(self._generate_gap_analysis())
+            
+            # Implementation Recommendations
+            report_sections.append(self._generate_implementation_recommendations())
+            
+            # Save report
+            full_report = "\n\n".join(report_sections)
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            
+            with open(f'dora_analysis_report_{timestamp}.md', 'w', encoding='utf-8') as f:
+                f.write(full_report)
+            
+            return full_report
+            
+        except Exception as e:
+            print(f"Error generating report: {str(e)}")
+            return str(e)
+
+    def _generate_executive_summary(self):
+        """Generate executive summary of the analysis."""
+        total_reqs = sum(len(reqs) for reqs in self.rts_requirements.values()) + \
+                    sum(len(reqs) for reqs in self.its_requirements.values())
+        
+        covered_reqs = sum(1 for reqs in self.policy_coverage.values() 
+                          for req in reqs if req['covered'])
+        
+        summary = [
+            "# DORA Compliance Analysis - Executive Summary",
+            "",
+            f"Analysis Date: {datetime.now().strftime('%Y-%m-%d')}",
+            "",
+            "## Key Findings",
+            "",
+            f"- Total Requirements Analyzed: {total_reqs}",
+            f"- Requirements Covered: {covered_reqs}",
+            f"- Coverage Rate: {(covered_reqs/total_reqs*100):.1f}%",
+            "",
+            "## Critical Gaps",
+            self._identify_critical_gaps(),
+            "",
+            "## Risk Summary",
+            self._generate_risk_summary(),
+            "",
+            "## Implementation Priorities",
+            self._generate_priority_recommendations()
+        ]
+        
+        return "\n".join(summary)
+
+    def _generate_policy_area_analysis(self):
+        """Generate detailed analysis by policy area."""
+        analysis = ["# Detailed Policy Area Analysis", ""]
+        
+        for area, data in self.policy_coverage.items():
+            area_title = area.replace('_', ' ').title()
+            analysis.extend([
+                f"## {area_title}",
+                "",
+                "### Requirements Overview",
+                self._generate_area_requirements_summary(area, data),
+                "",
+                "### Implementation Complexity",
+                self._generate_area_complexity_summary(area, data),
+                "",
+                "### Risk Assessment",
+                self._generate_area_risk_summary(area, data),
+                "",
+                "### Coverage Analysis",
+                self._generate_area_coverage_summary(area, data),
+                ""
+            ])
+        
+        return "\n".join(analysis)
+
+    def _generate_area_requirements_summary(self, area, data):
+        """Generate requirements overview for a policy area."""
+        # Implementation to generate area requirements summary
+        pass
+
+    def _generate_area_complexity_summary(self, area, data):
+        """Generate complexity summary for a policy area."""
+        # Implementation to generate area complexity summary
+        pass
+
+    def _generate_area_risk_summary(self, area, data):
+        """Generate risk summary for a policy area."""
+        # Implementation to generate area risk summary
+        pass
+
+    def _generate_area_coverage_summary(self, area, data):
+        """Generate coverage summary for a policy area."""
+        # Implementation to generate area coverage summary
+        pass
+
+    def _generate_risk_complexity_analysis(self):
+        """Generate risk and complexity analysis."""
+        # Implementation to generate risk and complexity analysis
+        pass
+
+    def _generate_gap_analysis(self):
+        """Generate gap analysis."""
+        # Implementation to generate gap analysis
+        pass
+
+    def _generate_implementation_recommendations(self):
+        """Generate implementation recommendations."""
+        # Implementation to generate implementation recommendations
+        pass
+
+    def _generate_risk_summary(self):
+        """Generate risk summary."""
+        # Implementation to generate risk summary
+        pass
+
+    def _generate_priority_recommendations(self):
+        """Generate priority recommendations."""
+        # Implementation to generate priority recommendations
+        pass
+
+    def _identify_critical_gaps(self):
+        """Identify critical gaps."""
+        # Implementation to identify critical gaps
+        pass
+
+    def analyze_and_report(self):
+        """Main method to run complete analysis and generate reports."""
+        try:
+            print("Starting comprehensive DORA analysis...")
+            
+            # Step 1: Extract and analyze requirements
+            self.extract_technical_standards()
+            
+            # Step 2: Perform detailed analysis
+            analysis_results = self.analyze_requirements_by_policy_area()
+            
+            # Step 3: Generate dependency graph
+            self.generate_dependency_graph()
+            
+            # Step 4: Generate gap analysis visualizations
+            self.generate_gap_analysis_visualization()
+            
+            # Step 5: Generate detailed report
+            report = self.generate_detailed_report()
+            
+            # Step 6: Generate implementation roadmap
+            roadmap = self.generate_implementation_roadmap(analysis_results)
+            
+            print("Analysis complete. Reports and visualizations generated.")
+            
+            return {
+                'report': report,
+                'roadmap': roadmap,
+                'analysis_results': analysis_results
+            }
+            
+        except Exception as e:
+            print(f"Error in analysis and reporting: {str(e)}")
+            return None
+
+    def generate_implementation_roadmap(self, analysis_results):
+        """Generate implementation roadmap based on analysis."""
+        try:
+            roadmap = {
+                'immediate': [],
+                'short_term': [],
+                'medium_term': [],
+                'long_term': []
+            }
+            
+            for area, data in analysis_results.items():
+                for req in data['requirements']:
+                    priority = self._determine_implementation_priority(
+                        req['analysis']['complexity_score'],
+                        req.get('risk_level', {}).get('score', 0),
+                        req.get('coverage', False)
+                    )
+                    
+                    roadmap[priority].append({
+                        'area': area,
+                        'requirement': req['text'],
+                        'complexity': req['analysis']['complexity_level'],
+                        'risk_level': req.get('risk_level', {}).get('risk_level', 'Unknown'),
+                        'dependencies': req['analysis']['dependencies']
+                    })
+            
+            return self._format_roadmap(roadmap)
+            
+        except Exception as e:
+            print(f"Error generating roadmap: {str(e)}")
+            return None
+
+    def _format_roadmap(self, roadmap):
+        """Format the implementation roadmap as a structured document."""
+        formatted = ["# DORA Implementation Roadmap", ""]
+        
+        timeframes = {
+            'immediate': '0-3 months',
+            'short_term': '3-6 months',
+            'medium_term': '6-12 months',
+            'long_term': '12+ months'
+        }
+        
+        for phase, items in roadmap.items():
+            formatted.extend([
+                f"## {phase.replace('_', ' ').title()} Priority ({timeframes[phase]})",
+                ""
+            ])
+            
+            for item in items:
+                formatted.extend([
+                    f"### {item['area'].replace('_', ' ').title()}",
+                    "",
+                    f"**Requirement:** {item['requirement'][:200]}...",
+                    f"**Complexity:** {item['complexity']}",
+                    f"**Risk Level:** {item['risk_level']}",
+                    "",
+                    "**Dependencies:**"
+                ])
+                
+                for dep in item['dependencies']:
+                    formatted.append(f"- {dep}")
+                
+                formatted.append("")
+        
+        return "\n".join(formatted)
 
 def main():
     # Initialize analyzer with DORA document
