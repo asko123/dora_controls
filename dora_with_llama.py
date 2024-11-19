@@ -605,8 +605,10 @@ Provide only a number between 0 and 1.<|eot_id|><|start_header_id|>assistant<|en
         # Calculate weighted Jaccard similarity
         intersection_score = sum(
             min(words1.get(w, 0), words2.get(w, 0)) for w in set(words1) & set(words2)
+        )
         union_score = sum(
             max(words1.get(w, 0), words2.get(w, 0)) for w in set(words1) | set(words2)
+        )
 
         semantic_sim = intersection_score / union_score if union_score > 0 else 0
 
