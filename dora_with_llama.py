@@ -66,8 +66,10 @@ class DORAComplianceAnalyzer:
             model="meta-llama/Llama-3.2-3B-Instruct",
             torch_dtype=torch.bfloat16,
             device_map="auto",
-            max_length=2048,
+            max_new_tokens=2048,
             temperature=0.1,  # Lower temperature for more focused analysis
+            pad_token_id=2,  # Explicitly set pad_token_id
+            eos_token_id=2,  # Explicitly set eos_token_id
         )
 
     def _initialize_policy_areas(self):
@@ -603,10 +605,8 @@ Provide only a number between 0 and 1.<|eot_id|><|start_header_id|>assistant<|en
         # Calculate weighted Jaccard similarity
         intersection_score = sum(
             min(words1.get(w, 0), words2.get(w, 0)) for w in set(words1) & set(words2)
-        )
         union_score = sum(
             max(words1.get(w, 0), words2.get(w, 0)) for w in set(words1) | set(words2)
-        )
 
         semantic_sim = intersection_score / union_score if union_score > 0 else 0
 
