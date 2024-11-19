@@ -432,43 +432,52 @@ class DORAComplianceAnalyzer:
         
         return (0.5 * cosine_sim) + (0.5 * semantic_sim)
 
-    def _process_completed_table(self, table: List[List[str]], tables_data: List[Dict], start_page: int = None, end_page: int = None) -> None:
-        """Process a completed table and add it to tables_data."""
-        try:
-            # Remove empty rows and clean cell content
-            cleaned_table = [
-                [self._clean_cell_content(cell) for cell in row]
-                for row in table
-                if any(cell.strip() for cell in row)
-            ]
-            
-            if not cleaned_table:
-                return
-            
-            # Create DataFrame
-            df = pd.DataFrame(cleaned_table[1:], columns=cleaned_table[0])
-            
-            # Store table data with metadata
-            tables_data.append({
-                'data': df,
-                'header': cleaned_table[0],
-                'num_rows': len(df),
-                'num_cols': len(df.columns),
-                'start_page': start_page,
-                'end_page': end_page
-            })
+def _process_completed_table(self, table: List[List[str]], tables_data: List[Dict], start_page: int = None, end_page: int = None) -> None:
+    """Process a completed table and add it to tables_data."""
+    try:
+        # Validate table
+        if not table or not isinstance(table, list):
+            return
+
+        # Remove empty rows and clean cell content
+        cleaned_table = []
+        for row in table:
+            if not row:
+                continue
+            cleaned_row = [self._clean_cell_content(cell) for cell in row]
+            if any(cleaned_row):  # Only keep rows with at least one non-empty cell
+                cleaned_table.append(cleaned_row)
         
-        except Exception as e:
-            print(f"Error processing table: {str(e)}")
+        if not cleaned_table:
+            return
+        
+        # Create DataFrame
+        df = pd.DataFrame(cleaned_table[1:], columns=cleaned_table[0])
+        
+        # Store table data with metadata
+        tables_data.append({
+            'data': df,
+            'header': cleaned_table[0],
+            'num_rows': len(df),
+            'num_cols': len(df.columns),
+            'start_page': start_page,
+            'end_page': end_page
+        })
+    
+    except Exception as e:
+        print(f"Error processing table: {str(e)}")
 
     def _clean_cell_content(self, cell: str) -> str:
         """Clean individual cell content."""
-        if not isinstance(cell, str):
-            return str(cell)
+        if cell is None:
+            return ""
+        
+        # Convert non-string values to string
+        cell = str(cell)
         
         # Remove extra whitespace and newlines
         cleaned = ' '.join(cell.split())
-        return cleaned.strip()
+        return cleaned.strip() 
 
     def _remove_table_content_from_text(self, text: str, tables: List[List[List[str]]]) -> str:
         """Remove table content from extracted text to avoid duplication."""
