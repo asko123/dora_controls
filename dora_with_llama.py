@@ -600,49 +600,292 @@ class DORAComplianceAnalyzer:
 
         return (0.5 * cosine_sim) + (0.5 * semantic_sim)
 
+    def analyze_policy_document(self, policy_pdf_path: str, policy_name: str):
+        """Analyze a policy document and identify gaps."""
+        try:
+            print(f"\nAnalyzing policy document: {policy_name}")
+            
+            # Extract text from policy document
+            with pdfplumber.open(policy_pdf_path) as pdf:
+                policy_text = ""
+                for page in pdf.pages:
+                    policy_text += page.extract_text() + "\n"
+            
+            # Process requirements for each policy area
+            coverage_results = []
+            
+            # Analyze RTS requirements
+            for article_num, reqs in self.rts_requirements.items():
+                for req in reqs:
+                    coverage = self._analyze_requirement_coverage(req, policy_text)
+                    coverage_results.append({
+                        'article_num': article_num,
+                        'requirement_text': req['requirement_text'],
+                        'requirement_type': 'RTS',
+                        'covered': coverage['covered'],
+                        'similarity_score': coverage['similarity_score']
+                    })
+            
+            # Analyze ITS requirements
+            for article_num, reqs in self.its_requirements.items():
+                for req in reqs:
+                    coverage = self._analyze_requirement_coverage(req, policy_text)
+                    coverage_results.append({
+                        'article_num': article_num,
+                        'requirement_text': req['requirement_text'],
+                        'requirement_type': 'ITS',
+                        'covered': coverage['covered'],
+                        'similarity_score': coverage['similarity_score']
+                    })
+            
+            # Store results
+            self.policy_coverage[policy_name] = coverage_results
+            
+            # Print analysis summary
+            self._print_analysis_summary(policy_name, coverage_results)
+            
+        except Exception as e:
+            print(f"Error analyzing policy document: {str(e)}")
+            raise
 
-def _process_completed_table(
-    self,
-    table: List[List[str]],
-    tables_data: List[Dict],
-    start_page: int = None,
-    end_page: int = None,
-) -> None:
-    """Process a completed table and add it to tables_data."""
-    try:
-        # Validate table
-        if not table or not isinstance(table, list):
-            return
+    def generate_gap_analysis_report(self):
+        """Generate a comprehensive gap analysis report."""
+        try:
+            report_sections = []
+            
+            # Executive Summary
+            total_policies = len(self.policy_coverage)
+            total_requirements = sum(len(reqs) for reqs in self.policy_coverage.values())
+            covered_requirements = sum(
+                len([r for r in reqs if r['covered']])
+                for reqs in self.policy_coverage.values()
+            )
+            
+            coverage_rate = (covered_requirements / total_requirements * 100) if total_requirements > 0 else 0
+            
+            report_sections.extend([
+                "DORA Gap Analysis Report",
+                "=" * 50,
+                "\nExecutive Summary",
+                "-" * 20,
+                f"Total Policies Analyzed: {total_policies}",
+                f"Total Requirements: {total_requirements}",
+                f"Requirements Covered: {covered_requirements}",
+                f"Overall Coverage Rate: {coverage_rate:.1f}%",
+                "\nDetailed Analysis",
+                "-" * 20
+            ])
+            
+            # Policy-specific analysis
+            for policy_name, requirements in self.policy_coverage.items():
+                report_sections.extend([
+                    f"\nPolicy: {policy_name}",
+                    "-" * (len(policy_name) + 8)
+                ])
+                
+                # Group requirements by type
+                rts_reqs = [r for r in requirements if r['requirement_type'] == 'RTS']
+                its_reqs = [r for r in requirements if r['requirement_type'] == 'ITS']
+                
+                # RTS requirements analysis
+                report_sections.extend([
+                    "\nRTS Requirements:",
+                    f"Total: {len(rts_reqs)}",
+                    f"Covered: {len([r for r in rts_reqs if r['covered']])}",
+                    "\nMajor RTS Gaps:"
+                ])
+                
+                for req in [r for r in rts_reqs if not r['covered']][:3]:
+                    report_sections.append(
+                        f"- Article {req['article_num']}: {req['requirement_text'][:200]}..."
+                    )
+                
+                # ITS requirements analysis
+                report_sections.extend([
+                    "\nITS Requirements:",
+                    f"Total: {len(its_reqs)}",
+                    f"Covered: {len([r for r in its_reqs if r['covered']])}",
+                    "\nMajor ITS Gaps:"
+                ])
+                
+                for req in [r for r in its_reqs if not r['covered']][:3]:
+                    report_sections.append(
+                        f"- Article {req['article_num']}: {req['requirement_text'][:200]}..."
+                    )
+            
+            # Recommendations
+            report_sections.extend([
+                "\nRecommendations",
+                "-" * 15,
+                "1. Address critical gaps in RTS requirements",
+                "2. Implement missing ITS controls",
+                "3. Enhance documentation coverage",
+                "4. Establish regular compliance monitoring"
+            ])
+            
+            return "\n".join(report_sections)
+            
+        except Exception as e:
+            print(f"Error generating gap analysis report: {str(e)}")
+            return "Error generating report"
 
-        # Remove empty rows and clean cell content
-        cleaned_table = []
-        for row in table:
-            if not row:
+    def _remove_table_content_from_text(self, text: str, tables: List[List[List[str]]]) -> str:
+        """Remove table content from text."""
+        if not tables:
+            return text
+        
+        # Create a set of table content for faster lookup
+        table_content = set()
+        for table in tables:
+            for row in table:
+                for cell in row:
+                    if isinstance(cell, str):
+                        table_content.add(cell.strip())
+        
+        # Split text into lines and remove those containing table content
+        lines = text.split('\n')
+        cleaned_lines = []
+        
+        for line in lines:
+            line = line.strip()
+            if not line:
                 continue
-            cleaned_row = [self._clean_cell_content(cell) for cell in row]
-            if any(cleaned_row):  # Only keep rows with at least one non-empty cell
-                cleaned_table.append(cleaned_row)
+            
+            should_keep = True
+            for content in table_content:
+                if content in line:
+                    should_keep = False
+                    break
+            
+            if should_keep:
+                cleaned_lines.append(line)
+        
+        return '\n'.join(cleaned_lines)
 
-        if not cleaned_table:
-            return
+    def extract_technical_standards(self) -> int:
+        """Extract RTS and ITS requirements with enhanced detection and logging."""
+        try:
+            print("\nStarting technical standards extraction...")
+            
+            # Extract articles with enhanced pattern
+            article_pattern = r"Article\s+(\d+[a-z]?)\s*[–-]?\s*([^\n]+)(?:\n|\r\n?)(.*?)(?=Article\s+\d+[a-z]?|$)"
+            articles = re.finditer(article_pattern, self.dora_text, re.DOTALL | re.IGNORECASE)
+            
+            print("\nExtracting requirements from articles...")
+            articles_processed = 0
+            rts_found = 0
+            its_found = 0
+            
+            for article in articles:
+                articles_processed += 1
+                article_num = article.group(1)
+                article_title = article.group(2).strip()
+                article_content = article.group(3).strip()
+                
+                print(f"\nProcessing Article {article_num}: {article_title}")
+                
+                # Identify policy area for the article
+                article_area = self._identify_policy_area(f"{article_title} {article_content}")
+                print(f"Identified policy area: {article_area}")
+                
+                # Process RTS requirements
+                for pattern in rts_patterns:
+                    matches = re.finditer(pattern, article_content, re.IGNORECASE | re.MULTILINE)
+                    for match in matches:
+                        rts_found += 1
+                        full_requirement = self._extract_full_requirement(article_content, match.start())
+                        print(f"\nFound RTS requirement in Article {article_num}:")
+                        print(f"Requirement text: {match.group(1)[:200]}...")
+                        
+                        requirement = {
+                            'article_num': article_num,
+                            'article_title': article_title,
+                            'requirement_text': match.group(1).strip(),
+                            'full_context': full_requirement,
+                            'type': 'RTS',
+                            'policy_area': article_area,
+                            'pattern_matched': pattern
+                        }
+                        self.rts_requirements[article_num].append(requirement)
+                
+                # Process ITS requirements
+                for pattern in its_patterns:
+                    matches = re.finditer(pattern, article_content, re.IGNORECASE | re.MULTILINE)
+                    for match in matches:
+                        its_found += 1
+                        full_requirement = self._extract_full_requirement(article_content, match.start())
+                        print(f"\nFound ITS requirement in Article {article_num}:")
+                        print(f"Requirement text: {match.group(1)[:200]}...")
+                        
+                        requirement = {
+                            'article_num': article_num,
+                            'article_title': article_title,
+                            'requirement_text': match.group(1).strip(),
+                            'full_context': full_requirement,
+                            'type': 'ITS',
+                            'policy_area': article_area,
+                            'pattern_matched': pattern
+                        }
+                        self.its_requirements[article_num].append(requirement)
+            
+            # Summary statistics
+            total_rts = sum(len(reqs) for reqs in self.rts_requirements.values())
+            total_its = sum(len(reqs) for reqs in self.its_requirements.values())
+            
+            print("\nExtraction Summary:")
+            print(f"Articles processed: {articles_processed}")
+            print(f"RTS requirements found: {total_rts}")
+            print(f"ITS requirements found: {total_its}")
+            print(f"Total requirements: {total_rts + total_its}")
+            
+            return total_rts + total_its
+            
+        except Exception as e:
+            print(f"Error in technical standards extraction: {str(e)}")
+            return 0
 
-        # Create DataFrame
-        df = pd.DataFrame(cleaned_table[1:], columns=cleaned_table[0])
+    def _process_completed_table(
+        self,
+        table: List[List[str]],
+        tables_data: List[Dict],
+        start_page: int = None,
+        end_page: int = None,
+    ) -> None:
+        """Process a completed table and add it to tables_data."""
+        try:
+            # Validate table
+            if not table or not isinstance(table, list):
+                return
 
-        # Store table data with metadata
-        tables_data.append(
-            {
-                "data": df,
-                "header": cleaned_table[0],
-                "num_rows": len(df),
-                "num_cols": len(df.columns),
-                "start_page": start_page,
-                "end_page": end_page,
-            }
-        )
+            # Remove empty rows and clean cell content
+            cleaned_table = []
+            for row in table:
+                if not row:
+                    continue
+                cleaned_row = [self._clean_cell_content(cell) for cell in row]
+                if any(cleaned_row):  # Only keep rows with at least one non-empty cell
+                    cleaned_table.append(cleaned_row)
 
-    except Exception as e:
-        print(f"Error processing table: {str(e)}")
+            if not cleaned_table:
+                return
+
+            # Create DataFrame
+            df = pd.DataFrame(cleaned_table[1:], columns=cleaned_table[0])
+
+            # Store table data with metadata
+            tables_data.append(
+                {
+                    "data": df,
+                    "header": cleaned_table[0],
+                    "num_rows": len(df),
+                    "num_cols": len(df.columns),
+                    "start_page": start_page,
+                    "end_page": end_page,
+                }
+            )
+
+        except Exception as e:
+            print(f"Error processing table: {str(e)}")
 
     def _clean_cell_content(self, cell: str) -> str:
         """Clean individual cell content."""
