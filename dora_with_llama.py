@@ -43,6 +43,7 @@ class DORAComplianceAnalyzer:
             self.rts_requirements = defaultdict(list)
             self.its_requirements = defaultdict(list)
             self.policy_coverage = defaultdict(list)
+            self.articles_processed = 0  # Add this line
 
             print("Initialization complete.")
 
@@ -691,144 +692,46 @@ Provide only a number between 0 and 1.<|eot_id|><|start_header_id|>assistant<|en
         try:
             report_sections = []
             
-            # Executive Summary
-            total_policies = len(self.policy_coverage)
-            total_requirements = sum(len(reqs) for reqs in self.policy_coverage.values())
-            covered_requirements = sum(
-                len([r for r in reqs if r['covered']])
-                for reqs in self.policy_coverage.values()
-            )
-            
-            coverage_rate = (covered_requirements / total_requirements * 100) if total_requirements > 0 else 0
-            
+            # Extraction Summary Section
             report_sections.extend([
                 "DORA Gap Analysis Report",
                 "=" * 50,
-                "\n1. Executive Summary",
+                "\n1. Extraction Summary",
                 "-" * 20,
-                f"Total Policies Analyzed: {total_policies}",
-                f"Total Requirements: {total_requirements}",
-                f"Requirements Covered: {covered_requirements}",
-                f"Overall Coverage Rate: {coverage_rate:.1f}%",
-                
-                "\n2. DORA Requirements Breakdown",
-                "-" * 30,
-                "\n2.1 RTS Requirements:",
+                f"Articles processed: {self.articles_processed}",
+                f"RTS requirements found: {sum(len(reqs) for reqs in self.rts_requirements.values())}",
+                f"ITS requirements found: {sum(len(reqs) for reqs in self.its_requirements.values())}",
+                "\nRequirements by Policy Area:",
             ])
             
-            # Detailed RTS Requirements
-            for article_num, reqs in sorted(self.rts_requirements.items()):
-                report_sections.extend([
-                    f"\nArticle {article_num}:",
-                    "-" * (len(str(article_num)) + 8)
-                ])
-                
-                # Show both covered and not covered requirements
-                covered_reqs = [r for r in reqs if r.get('covered', False)]
-                uncovered_reqs = [r for r in reqs if not r.get('covered', False)]
-                
-                if covered_reqs:
-                    report_sections.append("\nCovered Requirements:")
-                    for idx, req in enumerate(covered_reqs, 1):
-                        report_sections.extend([
-                            f"\nRequirement {idx}:",
-                            f"Text: {req['requirement_text']}",
-                            f"Policy Area: {req['policy_area']}",
-                            f"Similarity Score: {req.get('similarity_score', 0):.2f}"
-                        ])
-                        if req.get('matching_sections'):
-                            report_sections.append("Matching Policy Sections:")
-                            for match in req['matching_sections']:
-                                report_sections.append(f"- {match['text'][:200]}...")
-                
-                if uncovered_reqs:
-                    report_sections.append("\nGaps (Not Covered):")
-                    for idx, req in enumerate(uncovered_reqs, 1):
-                        report_sections.extend([
-                            f"\nRequirement {idx}:",
-                            f"Text: {req['requirement_text']}",
-                            f"Policy Area: {req['policy_area']}",
-                            f"Similarity Score: {req.get('similarity_score', 0):.2f}"
-                        ])
-            
-            # Detailed ITS Requirements
-            report_sections.append("\n2.2 ITS Requirements:")
-            
-            for article_num, reqs in sorted(self.its_requirements.items()):
-                report_sections.extend([
-                    f"\nArticle {article_num}:",
-                    "-" * (len(str(article_num)) + 8)
-                ])
-                
-                # Show both covered and not covered requirements
-                covered_reqs = [r for r in reqs if r.get('covered', False)]
-                uncovered_reqs = [r for r in reqs if not r.get('covered', False)]
-                
-                if covered_reqs:
-                    report_sections.append("\nCovered Requirements:")
-                    for idx, req in enumerate(covered_reqs, 1):
-                        report_sections.extend([
-                            f"\nRequirement {idx}:",
-                            f"Text: {req['requirement_text']}",
-                            f"Policy Area: {req['policy_area']}",
-                            f"Similarity Score: {req.get('similarity_score', 0):.2f}"
-                        ])
-                        if req.get('matching_sections'):
-                            report_sections.append("Matching Policy Sections:")
-                            for match in req['matching_sections']:
-                                report_sections.append(f"- {match['text'][:200]}...")
-                
-                if uncovered_reqs:
-                    report_sections.append("\nGaps (Not Covered):")
-                    for idx, req in enumerate(uncovered_reqs, 1):
-                        report_sections.extend([
-                            f"\nRequirement {idx}:",
-                            f"Text: {req['requirement_text']}",
-                            f"Policy Area: {req['policy_area']}",
-                            f"Similarity Score: {req.get('similarity_score', 0):.2f}"
-                        ])
-            
-            # Gap Analysis by Policy Area
-            report_sections.extend([
-                "\n3. Gap Analysis by Policy Area",
-                "-" * 30
-            ])
-            
+            # Add policy area breakdown
             for area in sorted(set(req['policy_area'] for reqs in self.rts_requirements.values() for req in reqs)):
-                area_reqs = []
-                for reqs in self.rts_requirements.values():
-                    area_reqs.extend([r for r in reqs if r['policy_area'] == area])
-                for reqs in self.its_requirements.values():
-                    area_reqs.extend([r for r in reqs if r['policy_area'] == area])
-                
-                total_area = len(area_reqs)
-                covered_area = len([r for r in area_reqs if r.get('covered', False)])
-                
-                coverage_rate = (covered_area/total_area*100) if total_area > 0 else 0
+                rts_count = sum(1 for reqs in self.rts_requirements.values() 
+                              for req in reqs if req['policy_area'] == area)
+                its_count = sum(1 for reqs in self.its_requirements.values() 
+                              for req in reqs if req['policy_area'] == area)
                 
                 report_sections.extend([
                     f"\n{area.replace('_', ' ').title()}:",
-                    f"Total Requirements: {total_area}",
-                    f"Requirements Covered: {covered_area}",
-                    f"Coverage Rate: {coverage_rate:.1f}%"
+                    f"- RTS Requirements: {rts_count}",
+                    f"- ITS Requirements: {its_count}",
+                    f"- Total: {rts_count + its_count}"
                 ])
             
-            # Recommendations
+            # Analysis Results Section
             report_sections.extend([
-                "\n4. Recommendations",
-                "-" * 20,
-                "4.1 High Priority Actions:",
-                "- Address critical gaps in RTS requirements",
-                "- Implement missing ITS controls",
-                "- Enhance documentation coverage",
-                "\n4.2 Medium Priority Actions:",
-                "- Review and update existing controls",
-                "- Strengthen monitoring capabilities",
-                "- Develop comprehensive testing procedures"
+                "\n2. Policy Analysis Results",
+                "-" * 25
             ])
             
-            return "\n".join(report_sections)
+            # Add results for each analyzed policy
+            for policy_name, results in self.policy_coverage.items():
+                report_sections.extend([
+                    f"\nAnalyzing: {policy_name}",
+                    "-" * (len(policy_name) + 11)
+                ])
             
+            return "\n".join(report_sections)
         except Exception as e:
             print(f"Error generating gap analysis report: {str(e)}")
             return "Error generating report"
