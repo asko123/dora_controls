@@ -654,7 +654,7 @@ Provide only a number between 0 and 1.<|eot_id|><|start_header_id|>assistant<|en
                     if coverage['covered']:
                         print(f"\nFound coverage for ITS requirement in Article {article_num}:")
                         print(f"Requirement: {req['requirement_text'][:200]}...")
-                        print(f"Similarity score: {coverage['similarity_score']:.2f}"
+                        print(f"Similarity score: {coverage['similarity_score']:.2f}")
                         
                         # Update requirement coverage status
                         req['covered'] = True
