@@ -615,77 +615,65 @@ Provide only a number between 0 and 1.<|eot_id|><|start_header_id|>assistant<|en
 
         return (0.5 * cosine_sim) + (0.5 * semantic_sim)
 
-    def analyze_policy_document(self, policy_pdf_path: str, policy_name: str):
-        """Analyze a policy document and identify gaps."""
+    def analyze_policy_document(self, policy_path: str, policy_name: str) -> None:
+        """Analyze a policy document against DORA requirements."""
         try:
             print(f"\nAnalyzing policy document: {policy_name}")
             
-            # Extract text from policy document
-            with pdfplumber.open(policy_pdf_path) as pdf:
-                policy_text = ""
-                for page in pdf.pages:
-                    policy_text += page.extract_text() + "\n"
-            
-            coverage_results = []
-            total_requirements = 0
-            covered_requirements = 0
+            # Load and process policy document
+            policy_text = self._extract_text_from_pdf(policy_path)
+            if not policy_text:
+                print(f"Warning: No text extracted from {policy_name}")
+                return
+
+            # Debug logging
+            print(f"\nRTS Requirements to check: {sum(len(reqs) for reqs in self.rts_requirements.values())}")
+            print(f"ITS Requirements to check: {sum(len(reqs) for reqs in self.its_requirements.values())}")
             
             # Analyze RTS requirements
             print("\nAnalyzing RTS requirements...")
             for article_num, reqs in self.rts_requirements.items():
                 for req in reqs:
-                    total_requirements += 1
                     coverage = self._analyze_requirement_coverage(req, policy_text)
                     if coverage['covered']:
-                        covered_requirements += 1
                         print(f"\nFound coverage for RTS requirement in Article {article_num}:")
                         print(f"Requirement: {req['requirement_text'][:200]}...")
                         print(f"Similarity score: {coverage['similarity_score']:.2f}")
-                    
-                    coverage_results.append({
-                        'article_num': article_num,
-                        'requirement_text': req['requirement_text'],
-                        'requirement_type': 'RTS',
-                        'covered': coverage['covered'],
-                        'similarity_score': coverage['similarity_score']
-                    })
-            
+                        
+                        # Update requirement coverage status
+                        req['covered'] = True
+                        req['similarity_score'] = coverage['similarity_score']
+                        req['matching_sections'] = coverage['matching_sections']
+                        req['requirement_type'] = 'RTS'
+
             # Analyze ITS requirements
             print("\nAnalyzing ITS requirements...")
             for article_num, reqs in self.its_requirements.items():
                 for req in reqs:
-                    total_requirements += 1
                     coverage = self._analyze_requirement_coverage(req, policy_text)
                     if coverage['covered']:
-                        covered_requirements += 1
                         print(f"\nFound coverage for ITS requirement in Article {article_num}:")
                         print(f"Requirement: {req['requirement_text'][:200]}...")
-                        print(f"Similarity score: {coverage['similarity_score']:.2f}")
-                    
-                    coverage_results.append({
-                        'article_num': article_num,
-                        'requirement_text': req['requirement_text'],
-                        'requirement_type': 'ITS',
-                        'covered': coverage['covered'],
-                        'similarity_score': coverage['similarity_score']
-                    })
-            
-            # Store results
-            self.policy_coverage[policy_name] = coverage_results
-            
-            # Print analysis summary
-            print("\nAnalysis Summary:")
-            print(f"Total Requirements Analyzed: {total_requirements}")
-            print(f"Requirements Covered: {covered_requirements}")
-            if total_requirements > 0:
-                coverage_rate = (covered_requirements / total_requirements) * 100
-                print(f"Coverage Rate: {coverage_rate:.1f}%")
-            
-            return coverage_results
-            
+                        print(f"Similarity score: {coverage['similarity_score']:.2f}"
+                        
+                        # Update requirement coverage status
+                        req['covered'] = True
+                        req['similarity_score'] = coverage['similarity_score']
+                        req['matching_sections'] = coverage['matching_sections']
+                        req['requirement_type'] = 'ITS'
+
+            # Store policy coverage results
+            self.policy_coverage[policy_name] = []
+            for article_reqs in self.rts_requirements.values():
+                self.policy_coverage[policy_name].extend(article_reqs)
+            for article_reqs in self.its_requirements.values():
+                self.policy_coverage[policy_name].extend(article_reqs)
+
+            print(f"\nCompleted analysis of {policy_name}")
+            print(f"Total requirements covered: {len([r for r in self.policy_coverage[policy_name] if r['covered']])}")
+
         except Exception as e:
-            print(f"Error analyzing policy document: {str(e)}")
-            raise
+            print(f"Error analyzing policy document {policy_name}: {str(e)}")
 
     def generate_gap_analysis_report(self):
         """Generate a comprehensive gap analysis report with detailed breakdowns."""
@@ -701,6 +689,20 @@ Provide only a number between 0 and 1.<|eot_id|><|start_header_id|>assistant<|en
                 "\n2. Coverage Analysis",
                 "-" * 20,
             ]
+
+            # Verify data before generating report
+            print("\nVerifying data for report generation:")
+            print(f"RTS requirements: {sum(len(reqs) for reqs in self.rts_requirements.values())}")
+            print(f"ITS requirements: {sum(len(reqs) for reqs in self.its_requirements.values())}")
+            print(f"Policies analyzed: {len(self.policy_coverage)}")
+            
+            # Check if we have any requirements
+            if not self.rts_requirements and not self.its_requirements:
+                return "No requirements found. Please ensure requirements extraction was successful."
+            
+            # Check if we have analyzed any policies
+            if not self.policy_coverage:
+                return "No policies analyzed. Please ensure policy analysis was completed."
 
             # Analyze RTS Requirements
             report_sections.extend([
@@ -808,7 +810,7 @@ Provide only a number between 0 and 1.<|eot_id|><|start_header_id|>assistant<|en
             
         except Exception as e:
             print(f"Error generating gap analysis report: {str(e)}")
-            return "Error generating report"
+            return f"Error generating report: {str(e)}"
 
     def _remove_table_content_from_text(self, text: str, tables: List[List[List[str]]]) -> str:
         """Remove table content from text."""
