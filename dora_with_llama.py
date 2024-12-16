@@ -614,6 +614,21 @@ Provide only a number between 0 and 1.<|eot_id|><|start_header_id|>assistant<|en
         semantic_sim = intersection_score / union_score if union_score > 0 else 0
 
         return (0.5 * cosine_sim) + (0.5 * semantic_sim)
+    
+    def _extract_text_from_pdf(self, pdf_path: str) -> str:
+        """Extract text from a given PDF file and clean it."""
+        try:
+            extracted_text = ""
+            with pdfplumber.open(pdf_path) as pdf:
+                for page in pdf.pages:
+                    page_text = page.extract_text() or ""
+                    cleaned_text = self._clean_text(page_text)
+                    extracted_text += cleaned_text + "\n\n"
+            return extracted_text.strip()
+        except Exception as e:
+            print(f"Error extracting text from {pdf_path}: {str(e)}")
+            return ""
+
 
     def analyze_policy_document(self, policy_path: str, policy_name: str) -> None:
         """Analyze a policy document against DORA requirements."""
@@ -1243,6 +1258,8 @@ Respond with the most appropriate area name only.""",
             max_similarity = 0.0
             matching_sections = []
             
+            print(f"Analyzing requirement: {requirement['requirement_text'][:100]}...")
+            
             for sentence in policy_sentences:
                 try:
                     # Skip very short sentences
@@ -1254,7 +1271,8 @@ Respond with the most appropriate area name only.""",
                         similarity = req_doc.similarity(sentence_doc)
                         if similarity > max_similarity:
                             max_similarity = similarity
-                        if similarity > 0.6:  # Adjusted threshold
+                            print(f"Max similarity found: {max_similarity:.2f}")
+                        if similarity > 0.7:  # Adjusted threshold
                             matching_sections.append({
                                 'text': sentence,
                                 'similarity': similarity
@@ -1264,7 +1282,13 @@ Respond with the most appropriate area name only.""",
                     continue
             
             # Determine coverage based on similarity and matching sections
-            is_covered = max_similarity > 0.7 or len(matching_sections) > 0
+            #is_covered = max_similarity > 0.7 or len(matching_sections) > 0
+            is_covered = max_similarity > 0.8  
+            
+            if is_covered:
+                print("Requirement considered covered.")
+            else:
+                print("Requirement considered uncovered (gap).")
             
             return {
                 'covered': is_covered,
