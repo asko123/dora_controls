@@ -3,6 +3,7 @@ import pandas as pd
 import spacy
 import re
 import torch
+import torch.nn.functional as F  # Add this import
 from typing import Tuple, List, Dict
 from collections import defaultdict
 from pathlib import Path
@@ -25,7 +26,7 @@ from filelock import FileLock
 import psutil
 import gc
 from sentence_transformers import SentenceTransformer
-from transformers import util
+#from transformers import util
 import hashlib
 
 
@@ -1479,8 +1480,11 @@ class DORAComplianceAnalyzer:
                     policy_embedding = self.sentence_transformer.encode(policy_text, convert_to_tensor=True)
                     self.embedding_cache[policy_cache_key] = policy_embedding
                 
-                # Calculate cosine similarity
-                transformer_similarity = util.pytorch_cos_sim(req_embedding, policy_embedding).item()
+                # Calculate cosine similarity using torch.nn.functional
+                transformer_similarity = F.cosine_similarity(
+                    req_embedding.unsqueeze(0),
+                    policy_embedding.unsqueeze(0)
+                ).item()
                 
                 # Weight both similarities (favor transformer for accuracy)
                 final_similarity = (spacy_similarity * 0.3) + (transformer_similarity * 0.7)
