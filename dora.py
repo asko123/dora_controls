@@ -26,7 +26,7 @@ from filelock import FileLock
 import psutil
 import gc
 from sentence_transformers import SentenceTransformer
-#from transformers import util
+from transformers import util
 import hashlib
 
 
@@ -98,6 +98,21 @@ class DORAConfig:
     # Regular expressions
     ARTICLE_PATTERN = r"Article\s+(\d+[a-z]?)\s*[–-]?\s*([^\n]+)(?:\n|\r\n?)(.*?)(?=Article\s+\d+[a-z]?|$)"
     SENTENCE_SPLIT_PATTERN = r'[.!?]+'
+
+    # RTS and ITS patterns
+    RTS_PATTERNS = [
+        r"(?i)regulatory\s+technical\s+standards?\s+(?:shall|should|must|may|will)\s+[^.]+",
+        r"(?i)RTS\s+(?:shall|should|must|may|will)\s+[^.]+",
+        r"(?i)(?:develop|specify|adopt|implement)\s+regulatory\s+technical\s+standards?\s+[^.]+",
+        r"(?i)regulatory\s+technical\s+standards?\s+(?:for|on|regarding|concerning)\s+[^.]+"
+    ]
+    
+    ITS_PATTERNS = [
+        r"(?i)implementing\s+technical\s+standards?\s+(?:shall|should|must|may|will)\s+[^.]+",
+        r"(?i)ITS\s+(?:shall|should|must|may|will)\s+[^.]+",
+        r"(?i)(?:develop|specify|adopt|implement)\s+implementing\s+technical\s+standards?\s+[^.]+",
+        r"(?i)implementing\s+technical\s+standards?\s+(?:for|on|regarding|concerning)\s+[^.]+"
+    ]
 
     # Logging settings
     LOG_FILE = "dora_analyzer.log"
