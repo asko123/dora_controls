@@ -26,7 +26,7 @@ from filelock import FileLock
 import psutil
 import gc
 from sentence_transformers import SentenceTransformer
-from transformers import util
+#from transformers import util
 import hashlib
 
 
