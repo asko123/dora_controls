@@ -175,6 +175,10 @@ class DORAConfig:
         try:
             re.compile(cls.ARTICLE_PATTERN)
             re.compile(cls.SENTENCE_SPLIT_PATTERN)
+            for pattern in cls.RTS_PATTERNS:
+                re.compile(pattern)
+            for pattern in cls.ITS_PATTERNS:
+                re.compile(pattern)
         except re.error as e:
             raise ValueError(f"Invalid regular expression pattern: {str(e)}")
         
@@ -780,10 +784,14 @@ class DORAComplianceAnalyzer:
         self.its_requirements = {}
         self.policy_coverage = {}
         self.cache_manager = CacheManager()
+        
+        # Compile regex patterns
+        self.rts_patterns = [re.compile(pattern) for pattern in DORAConfig.RTS_PATTERNS]
+        self.its_patterns = [re.compile(pattern) for pattern in DORAConfig.ITS_PATTERNS]
 
         # Initialize LLM components
         self.tokenizer = AutoTokenizer.from_pretrained(DORAConfig.LLM_MODEL_NAME)
-        self.model = AutoModelForSequenceClassification.from_pretrained(DORAConfig.LLM_MODEL_NAME, from_tf=True)
+        self.model = AutoModelForSequenceClassification.from_pretrained(DORAConfig.LLM_MODEL_NAME)
         self.zero_shot_classifier = pipeline("zero-shot-classification", model="facebook/bart-large-mnli")
         
         # Initialize sentence transformer for similarity calculations
@@ -832,8 +840,8 @@ class DORAComplianceAnalyzer:
                         article_title = article_data['title']
                         
                         # Process RTS requirements
-                        for pattern in DORAConfig.RTS_PATTERNS:
-                            matches = re.finditer(pattern, article_text, re.IGNORECASE | re.MULTILINE)
+                        for pattern in self.rts_patterns:
+                            matches = pattern.finditer(article_text, re.IGNORECASE | re.MULTILINE)
                             for match in matches:
                                 try:
                                     requirement_text = match.group(0).strip()
@@ -886,8 +894,8 @@ class DORAComplianceAnalyzer:
                                     continue
                         
                         # Process ITS requirements
-                        for pattern in DORAConfig.ITS_PATTERNS:
-                            matches = re.finditer(pattern, article_text, re.IGNORECASE | re.MULTILINE)
+                        for pattern in self.its_patterns:
+                            matches = pattern.finditer(article_text, re.IGNORECASE | re.MULTILINE)
                             for match in matches:
                                 try:
                                     requirement_text = match.group(0).strip()
@@ -1641,8 +1649,8 @@ class DORAComplianceAnalyzer:
                         article_title = article_data['title']
                         
                         # Process RTS requirements
-                        for pattern in DORAConfig.RTS_PATTERNS:
-                            matches = re.finditer(pattern, article_text, re.IGNORECASE | re.MULTILINE)
+                        for pattern in self.rts_patterns:
+                            matches = pattern.finditer(article_text, re.IGNORECASE | re.MULTILINE)
                             for match in matches:
                                 try:
                                     requirement_text = match.group(0).strip()
@@ -1695,8 +1703,8 @@ class DORAComplianceAnalyzer:
                                     continue
                         
                         # Process ITS requirements
-                        for pattern in DORAConfig.ITS_PATTERNS:
-                            matches = re.finditer(pattern, article_text, re.IGNORECASE | re.MULTILINE)
+                        for pattern in self.its_patterns:
+                            matches = pattern.finditer(article_text, re.IGNORECASE | re.MULTILINE)
                             for match in matches:
                                 try:
                                     requirement_text = match.group(0).strip()
