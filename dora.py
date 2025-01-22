@@ -28,6 +28,7 @@ import gc
 from sentence_transformers import SentenceTransformer
 #from transformers import util
 import hashlib
+from functools import partial
 
 
 def setup_logging(log_file: str = "dora_analyzer.log"):
@@ -79,12 +80,7 @@ class DORAConfig:
     MIN_SENTENCE_WORDS = 5
     
     # LLM settings
-    LLM_MODEL_NAME = "microsoft/deberta-v3-large"  # Better for regulatory text analysis
-    LLM_MAX_LENGTH = 512  # Maximum sequence length for DeBERTa
-    LLM_BATCH_SIZE = 8  # Batch size for efficient processing
-    LLM_CONTEXT_WEIGHT = 0.4  # Weight for context-based analysis
-    LLM_TEMPERATURE = 0.4  # Temperature for model predictions
-    LLM_TOP_K = 3  # Number of top predictions to consider
+    ZERO_SHOT_MODEL = "facebook/bart-large-mnli"  # Model for policy area classification
     LLM_THRESHOLD = 0.5  # Confidence threshold for predictions
     
     # File patterns
@@ -166,10 +162,8 @@ class DORAConfig:
             raise ValueError("MIN_SENTENCE_WORDS must be positive")
         
         # Validate LLM settings
-        if not cls.LLM_MODEL_NAME:
-            raise ValueError("LLM_MODEL_NAME cannot be empty")
-        if not (0 <= cls.LLM_CONTEXT_WEIGHT <= 1):
-            raise ValueError("LLM_CONTEXT_WEIGHT must be between 0 and 1")
+        if not cls.ZERO_SHOT_MODEL:
+            raise ValueError("ZERO_SHOT_MODEL cannot be empty")
         
         # Validate regular expressions
         try:
@@ -789,10 +783,9 @@ class DORAComplianceAnalyzer:
         self.rts_patterns = [re.compile(pattern) for pattern in DORAConfig.RTS_PATTERNS]
         self.its_patterns = [re.compile(pattern) for pattern in DORAConfig.ITS_PATTERNS]
 
-        # Initialize LLM components
-        self.tokenizer = AutoTokenizer.from_pretrained(DORAConfig.LLM_MODEL_NAME)
-        self.model = AutoModelForSequenceClassification.from_pretrained(DORAConfig.LLM_MODEL_NAME, from_tf=True)
-        self.zero_shot_classifier = pipeline("zero-shot-classification", model="facebook/bart-large-mnli")
+        # Initialize zero-shot classifier for policy area classification
+        self.zero_shot_classifier = pipeline("zero-shot-classification", 
+                                          model=DORAConfig.ZERO_SHOT_MODEL)
         
         # Initialize sentence transformer for similarity calculations
         self.sentence_transformer = SentenceTransformer('all-MiniLM-L6-v2')
@@ -1799,7 +1792,7 @@ class DORAComplianceAnalyzer:
                 
                 try:
                     # Get zero-shot predictions
-                    result = self.llm(
+                    result = self.zero_shot_classifier(
                         batch_text,
                         candidate_labels=candidate_labels,
                         multi_label=True
@@ -2132,8 +2125,13 @@ class DORAComplianceAnalyzer:
             return ["Percentage of requirements covered"]  # Return basic metric on error
 
 
-def process_policy(pdf_path):
-    """Process a single policy document."""
+def process_policy(pdf_path, dora_path):
+    """Process a single policy document.
+    
+    Args:
+        pdf_path: Path to the policy PDF file
+        dora_path: Path to the DORA regulation PDF file
+    """
     try:
         policy_name = pdf_path.stem.replace("_", " ").title()
         logger = logging.getLogger('DORAAnalyzer')
@@ -2231,8 +2229,12 @@ def main():
         
         with Pool(processes=num_processes) as pool:
             try:
+                # Create a partial function with dora_path
+                from functools import partial
+                process_policy_with_dora = partial(process_policy, dora_path=dora_path)
+                
                 results = list(tqdm(
-                    pool.imap_unordered(process_policy, pdf_files, chunksize=chunk_size),
+                    pool.imap_unordered(process_policy_with_dora, pdf_files, chunksize=chunk_size),
                     total=len(pdf_files),
                     desc="Analyzing policies",
                     disable=DORAConfig.PROGRESS_BAR_DISABLE
