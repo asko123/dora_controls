@@ -2132,6 +2132,75 @@ class DORAComplianceAnalyzer:
             return ["Percentage of requirements covered"]  # Return basic metric on error
 
 
+def process_policy(pdf_path):
+    """Process a single policy document."""
+    try:
+        policy_name = pdf_path.stem.replace("_", " ").title()
+        logger = logging.getLogger('DORAAnalyzer')
+        logger.info(f"Analyzing: {policy_name}")
+        
+        # Validate PDF before processing
+        if not pdf_path.exists():
+            raise FileNotFoundError(f"Policy file not found: {pdf_path}")
+        if pdf_path.stat().st_size == 0:
+            raise ValueError(f"Policy file is empty: {pdf_path}")
+        
+        # Extract text from PDF with proper resource management
+        policy_text = ""
+        try:
+            with pdfplumber.open(str(pdf_path)) as pdf:
+                total_pages = len(pdf.pages)
+                if total_pages == 0:
+                    raise ValueError(f"No pages found in PDF: {pdf_path}")
+                
+                for page in tqdm(pdf.pages, 
+                              desc=f"Reading {policy_name}", 
+                              total=total_pages,
+                              disable=DORAConfig.PROGRESS_BAR_DISABLE):
+                    page_text = page.extract_text() or ""
+                    policy_text += page_text + "\n\n"
+                    
+                    # Clear page object to free memory
+                    del page
+                    
+                    # Check memory usage
+                    memory_percent = psutil.Process().memory_percent()
+                    if memory_percent > 80:  # 80% threshold
+                        logger.warning(f"High memory usage detected: {memory_percent:.1f}%")
+                        gc.collect()
+        except Exception as e:
+            raise RuntimeError(f"Error extracting text from PDF: {str(e)}")
+        
+        # Validate extracted text
+        if not policy_text.strip():
+            raise ValueError(f"No text extracted from PDF: {pdf_path}")
+        
+        # Initialize analyzer with context manager
+        with DORAComplianceAnalyzer(dora_path) as analyzer:
+            # Analyze policy with retries
+            result = analyzer.analyze_policy_document(policy_name, policy_text)
+            
+            # Validate result
+            if not result or not isinstance(result, dict):
+                raise ValueError(f"Invalid analysis result for {policy_name}")
+            
+            return {
+                'policy_name': policy_name,
+                'file_path': str(pdf_path),
+                'result': result,
+                'success': True
+            }
+            
+    except Exception as e:
+        logger = logging.getLogger('DORAAnalyzer')
+        logger.error(f"Error analyzing {pdf_path.name}: {str(e)}", exc_info=True)
+        return {
+            'policy_name': pdf_path.stem.replace("_", " ").title(),
+            'file_path': str(pdf_path),
+            'error': str(e),
+            'success': False
+        }
+
 def main():
     """Main function to run the DORA compliance analyzer."""
     logger = logging.getLogger('DORAAnalyzer')
@@ -2141,144 +2210,74 @@ def main():
         dora_path = "CELEX_32022R2554_EN_TXT.pdf"
         policy_folder = "policies"
         
-        # Initialize analyzer with context manager
-        with DORAComplianceAnalyzer(dora_path) as analyzer:
-            logger.info("Extracting technical standards from DORA...")
-            analyzer.extract_technical_standards()
+        # Get all PDF files from the folder
+        logger.info(f"Scanning for policy documents in: {policy_folder}")
+        pdf_files = list(Path(policy_folder).glob("**/*.pdf"))
+        
+        if not pdf_files:
+            logger.warning("No PDF files found in the specified folder!")
+            return
+        
+        logger.info(f"Found {len(pdf_files)} policy documents")
+        
+        # Set up multiprocessing
+        num_processes = min(cpu_count(), len(pdf_files))
+        chunk_size = max(1, len(pdf_files) // (num_processes * 4))  # Dynamic chunk size
+        
+        # Process policies in parallel with progress tracking and error handling
+        logger.info(f"Starting parallel analysis with {num_processes} processes (chunk size: {chunk_size})...")
+        failed_policies = []
+        successful_policies = []
+        
+        with Pool(processes=num_processes) as pool:
+            try:
+                results = list(tqdm(
+                    pool.imap_unordered(process_policy, pdf_files, chunksize=chunk_size),
+                    total=len(pdf_files),
+                    desc="Analyzing policies",
+                    disable=DORAConfig.PROGRESS_BAR_DISABLE
+                ))
+                
+                # Process results
+                for result in results:
+                    if result['success']:
+                        successful_policies.append(result)
+                    else:
+                        failed_policies.append(result)
+                    
+            except KeyboardInterrupt:
+                logger.warning("Analysis interrupted by user")
+                pool.terminate()
+                raise
+            except Exception as e:
+                logger.error(f"Error in parallel processing: {str(e)}", exc_info=True)
+                pool.terminate()
+                raise
+        
+        # Log analysis summary
+        logger.info("\nAnalysis Summary:")
+        logger.info(f"Total policies processed: {len(pdf_files)}")
+        logger.info(f"Successful analyses: {len(successful_policies)}")
+        logger.info(f"Failed analyses: {len(failed_policies)}")
+        
+        if failed_policies:
+            logger.warning("\nFailed Policies:")
+            for policy in failed_policies:
+                logger.warning(f"- {policy['policy_name']}: {policy['error']}")
+        
+        # Generate and save gap analysis report
+        if successful_policies:
+            logger.info("Generating gap analysis report...")
+            report_path = analyzer.generate_gap_analysis_report()
             
-            # Get all PDF files from the folder
-            logger.info(f"Scanning for policy documents in: {policy_folder}")
-            pdf_files = list(Path(policy_folder).glob("**/*.pdf"))
-            
-            if not pdf_files:
-                logger.warning("No PDF files found in the specified folder!")
+            if report_path == "Error generating report":
+                logger.error("Failed to generate gap analysis report")
                 return
             
-            logger.info(f"Found {len(pdf_files)} policy documents")
-            
-            # Set up multiprocessing
-            num_processes = min(cpu_count(), len(pdf_files))
-            chunk_size = max(1, len(pdf_files) // (num_processes * 4))  # Dynamic chunk size
-            
-            def process_policy(pdf_path):
-                try:
-                    policy_name = pdf_path.stem.replace("_", " ").title()
-                    logger.info(f"Analyzing: {policy_name}")
-                    
-                    # Validate PDF before processing
-                    if not pdf_path.exists():
-                        raise FileNotFoundError(f"Policy file not found: {pdf_path}")
-                    if pdf_path.stat().st_size == 0:
-                        raise ValueError(f"Policy file is empty: {pdf_path}")
-                    
-                    # Extract text from PDF with proper resource management
-                    policy_text = ""
-                    try:
-                        with pdfplumber.open(str(pdf_path)) as pdf:
-                            total_pages = len(pdf.pages)
-                            if total_pages == 0:
-                                raise ValueError(f"No pages found in PDF: {pdf_path}")
-                            
-                            for page in tqdm(pdf.pages, 
-                                          desc=f"Reading {policy_name}", 
-                                          total=total_pages,
-                                          disable=DORAConfig.PROGRESS_BAR_DISABLE):
-                                page_text = page.extract_text() or ""
-                                policy_text += page_text + "\n\n"
-                                
-                                # Clear page object to free memory
-                                del page
-                                
-                                # Check memory usage
-                                memory_percent = psutil.Process().memory_percent()
-                                if memory_percent > 80:  # 80% threshold
-                                    logger.warning(f"High memory usage detected: {memory_percent:.1f}%")
-                                    import gc
-                                    gc.collect()
-                    except Exception as e:
-                        raise RuntimeError(f"Error extracting text from PDF: {str(e)}")
-                    
-                    # Validate extracted text
-                    if not policy_text.strip():
-                        raise ValueError(f"No text extracted from PDF: {pdf_path}")
-                    
-                    # Analyze policy with retries
-                    result = analyzer.analyze_policy_document(policy_name, policy_text)
-                    
-                    # Validate result
-                    if not result or not isinstance(result, dict):
-                        raise ValueError(f"Invalid analysis result for {policy_name}")
-                    
-                    return {
-                        'policy_name': policy_name,
-                        'file_path': str(pdf_path),
-                        'result': result,
-                        'success': True
-                    }
-                    
-                except Exception as e:
-                    logger.error(f"Error analyzing {pdf_path.name}: {str(e)}", exc_info=True)
-                    return {
-                        'policy_name': pdf_path.stem.replace("_", " ").title(),
-                        'file_path': str(pdf_path),
-                        'error': str(e),
-                        'success': False
-                    }
-            
-            # Process policies in parallel with progress tracking and error handling
-            logger.info(f"Starting parallel analysis with {num_processes} processes (chunk size: {chunk_size})...")
-            failed_policies = []
-            successful_policies = []
-            
-            with Pool(processes=num_processes) as pool:
-                try:
-                    results = list(tqdm(
-                        pool.imap_unordered(process_policy, pdf_files, chunksize=chunk_size),
-                        total=len(pdf_files),
-                        desc="Analyzing policies",
-                        disable=DORAConfig.PROGRESS_BAR_DISABLE
-                    ))
-                    
-                    # Process results
-                    for result in results:
-                        if result['success']:
-                            successful_policies.append(result)
-                        else:
-                            failed_policies.append(result)
-                    
-                except KeyboardInterrupt:
-                    logger.warning("Analysis interrupted by user")
-                    pool.terminate()
-                    raise
-                except Exception as e:
-                    logger.error(f"Error in parallel processing: {str(e)}", exc_info=True)
-                    pool.terminate()
-                    raise
-            
-            # Log analysis summary
-            logger.info("\nAnalysis Summary:")
-            logger.info(f"Total policies processed: {len(pdf_files)}")
-            logger.info(f"Successful analyses: {len(successful_policies)}")
-            logger.info(f"Failed analyses: {len(failed_policies)}")
-            
-            if failed_policies:
-                logger.warning("\nFailed Policies:")
-                for policy in failed_policies:
-                    logger.warning(f"- {policy['policy_name']}: {policy['error']}")
-            
-            # Generate and save gap analysis report
-            if successful_policies:
-                logger.info("Generating gap analysis report...")
-                report_path = analyzer.generate_gap_analysis_report()
-                
-                if report_path == "Error generating report":
-                    logger.error("Failed to generate gap analysis report")
-                    return
-                
-                logger.info(f"Gap analysis report has been written to {report_path}")
-            else:
-                logger.error("No successful policy analyses to generate report")
-            
+            logger.info(f"Gap analysis report has been written to {report_path}")
+        else:
+            logger.error("No successful policy analyses to generate report")
+        
     except FileNotFoundError as e:
         logger.error(f"File not found: {str(e)}")
         sys.exit(1)
@@ -2291,7 +2290,6 @@ def main():
     finally:
         # Clean up any temporary files or resources
         try:
-            import gc
             gc.collect()
         except Exception as e:
             logger.error(f"Error during cleanup: {str(e)}", exc_info=True)
