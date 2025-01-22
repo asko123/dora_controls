@@ -2205,6 +2205,12 @@ def main():
     setup_logging()  # Initialize logging
     
     try:
+        # Set multiprocessing start method to 'spawn' if CUDA is available
+        if torch.cuda.is_available():
+            import multiprocessing
+            multiprocessing.set_start_method('spawn', force=True)
+            logger.info("Using 'spawn' start method for multiprocessing with CUDA")
+        
         dora_path = "CELEX_32022R2554_EN_TXT.pdf"
         policy_folder = "policies"
         
