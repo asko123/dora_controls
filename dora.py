@@ -783,7 +783,7 @@ class DORAComplianceAnalyzer:
 
         # Initialize LLM components
         self.tokenizer = AutoTokenizer.from_pretrained(DORAConfig.LLM_MODEL_NAME)
-        self.model = AutoModelForSequenceClassification.from_pretrained(DORAConfig.LLM_MODEL_NAME)
+        self.model = AutoModelForSequenceClassification.from_pretrained(DORAConfig.LLM_MODEL_NAME, from_tf=True)
         self.zero_shot_classifier = pipeline("zero-shot-classification", model="facebook/bart-large-mnli")
         
         # Initialize sentence transformer for similarity calculations
