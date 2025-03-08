@@ -1,16 +1,15 @@
-# Debug standard_run_recurring to see what columns it has
-print("Columns in standard_run_recurring:")
-print(colnames(standard_run_recurring))
+# Missing scans - focus only on the latest runWeek
+missing_scan <- program_semgrep_scan %>% 
+  filter(runWeek == latest_runWeek)
 
-# Make sure the required columns exist before joining
-if(!"branch" %in% colnames(standard_run_recurring) || !"branch" %in% colnames(model_scan)) {
-  print("WARNING: Required columns missing before join:")
-  print(paste("standard_run_recurring columns:", paste(colnames(standard_run_recurring), collapse=", ")))
-  print(paste("model_scan columns:", paste(colnames(model_scan), collapse=", ")))
-  
-  # Fix columns if needed
-  if(!"branch" %in% colnames(model_scan)) {
-    print("Adding empty branch column to model_scan")
-    model_scan$branch <- NA
-  }
-}
+# Debug before the final join that's failing
+print("Columns in missing_scan before join with gitsha_info:")
+print(colnames(missing_scan))
+print("Columns in gitsha_info before join:")
+print(colnames(gitsha_info))
+
+# Use an explicit join specification with all matching columns
+missing_scan <- missing_scan %>%
+  left_join(gitsha_info, by = c("git_id", "gitSHA", "branch", "productStack")) %>%
+  filter(is.na(scan_id)) %>%
+  ungroup() %>% glimpse()
