@@ -1,16 +1,16 @@
-# Make sure startweek has proper date format before getting endweek
-model_pipeline <- model_pipeline %>%
-  mutate(
-    startweek = get_startWeek(ts)
-  )
+# Debug standard_run_recurring to see what columns it has
+print("Columns in standard_run_recurring:")
+print(colnames(standard_run_recurring))
 
-# Add a check to make sure startweek values are valid
-print("Sample startweek values after get_startWeek:")
-print(head(model_pipeline$startweek))
-
-# Now calculate endweek only for valid startweek values
-model_pipeline <- model_pipeline %>%
-  mutate(
-    endweek = ifelse(is.na(startweek), NA, get_endweek(startweek)),
-    runweek = get_biweekly_scope(startweek, endweek)
-  )
+# Make sure the required columns exist before joining
+if(!"branch" %in% colnames(standard_run_recurring) || !"branch" %in% colnames(model_scan)) {
+  print("WARNING: Required columns missing before join:")
+  print(paste("standard_run_recurring columns:", paste(colnames(standard_run_recurring), collapse=", ")))
+  print(paste("model_scan columns:", paste(colnames(model_scan), collapse=", ")))
+  
+  # Fix columns if needed
+  if(!"branch" %in% colnames(model_scan)) {
+    print("Adding empty branch column to model_scan")
+    model_scan$branch <- NA
+  }
+}
