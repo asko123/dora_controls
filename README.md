@@ -40,8 +40,8 @@ Both types of standards are crucial for compliance with DORA and are developed b
 
 1. Clone this repository:
    ```bash
-   git clone https://github.com/yourusername/dora-compliance-analyzer.git
-   cd dora-compliance-analyzer
+   git clone https://github.com/asko123/dora_controls.git
+   cd dora_controls
    ```
 
 2. Create and activate a virtual environment (recommended):
