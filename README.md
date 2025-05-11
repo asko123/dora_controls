@@ -1,4 +1,4 @@
-# DORA Compliance Analyzer
+# DORA Controls Analyzer
 
 A comprehensive tool for analyzing compliance with the Digital Operational Resilience Act (DORA - EU Regulation 2022/2554) by identifying gaps between your organization's policies and DORA requirements.
 
@@ -97,7 +97,11 @@ Before running the analyzer, ensure your files are organized as follows:
 ### Method 1: Direct Python Execution
 
 ```bash
-# From the root directory
+# Clone and navigate to the repository
+git clone https://github.com/asko123/dora_controls.git
+cd dora_controls
+
+# Run the analyzer
 python dora.py
 ```
 
@@ -166,8 +170,8 @@ You can adjust the analysis behavior by modifying the `DORAConfig` class in the 
 
 ```bash
 # Clone repository
-git clone https://github.com/yourusername/dora-compliance-analyzer.git
-cd dora-compliance-analyzer
+git clone https://github.com/asko123/dora_controls.git
+cd dora_controls
 
 # Setup virtual environment
 python -m venv venv
