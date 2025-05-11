@@ -80,16 +80,12 @@ psutil>=5.9.0
 Before running the analyzer, ensure your files are organized as follows:
 
 ```
-dora-compliance-analyzer/
-├── WorkShop/
-│   └── dora.py               # Main analyzer code
+├── dora.py                      # Main analyzer code
 ├── CELEX_32022R2554_EN_TXT.pdf  # DORA legislation PDF
-├── policies/                 # Your organization's policy documents
-│   ├── policy1.pdf
-│   ├── policy2.pdf
-│   └── ...
-├── requirements.txt          # Dependencies
-└── README.md                 # This file
+└── policies/                    # Your organization's policy documents
+    ├── policy1.pdf
+    ├── policy2.pdf
+    └── ...
 ```
 
 ## Running the Analyzer
