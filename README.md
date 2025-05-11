@@ -98,7 +98,7 @@ Before running the analyzer, ensure your files are organized as follows:
 
 ```bash
 # From the root directory
-python -m WorkShop.dora
+python dora.py
 ```
 
 ### Method 2: Import as Module
@@ -106,7 +106,7 @@ python -m WorkShop.dora
 If you want to run the analyzer from your own script:
 
 ```python
-from WorkShop.dora import DORAComplianceAnalyzer
+from dora import DORAComplianceAnalyzer
 
 # Initialize the analyzer
 analyzer = DORAComplianceAnalyzer("CELEX_32022R2554_EN_TXT.pdf")
@@ -119,16 +119,6 @@ analyzer.analyze_policy_document("Policy Name", policy_text)
 
 # Generate report
 analyzer.generate_gap_analysis_report()
-```
-
-### Method 3: Running the Main Function
-
-```bash
-# Navigate to the WorkShop directory
-cd WorkShop
-
-# Run the dora.py script
-python dora.py
 ```
 
 ## Output Files
@@ -195,16 +185,9 @@ mkdir -p policies
 cp /path/to/your/policies/*.pdf policies/
 
 # Run the analyzer
-python -m WorkShop.dora
+python dora.py
 
 # View the generated report (contains RTS and ITS compliance analysis)
 cat analysis_output/dora_gap_analysis_*.txt
 ```
 
-## License
-
-[Specify your license here]
-
-## Contributing
-
-[Instructions for contributing to the project]
