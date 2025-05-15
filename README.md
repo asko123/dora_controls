@@ -88,10 +88,14 @@ Before running the analyzer, ensure your files are organized as follows:
     └── ...
 ```
 
+**Note:** The `policies` folder will be created automatically if it doesn't exist. This is where you should place all your organization's policy documents in PDF format for analysis.
+
 ## Running the Analyzer
 
 1. Place the DORA legislation PDF (CELEX_32022R2554_EN_TXT.pdf) in the root directory
-2. Place your organization's policy documents (PDFs) in the `policies` folder
+2. Add your organization's policy documents (PDFs) to the `policies` folder
+   - If the folder doesn't exist, it will be created automatically on first run
+   - You must add your PDFs to this folder before running the analysis
 3. Run the analyzer using one of the following methods:
 
 ### Method 1: Direct Python Execution
@@ -164,7 +168,7 @@ You can adjust the analysis behavior by modifying the `DORAConfig` class in the 
 - **Slow Processing**: Use a GPU or increase `BATCH_SIZE` for parallel processing
 - **Low Coverage**: Adjust similarity thresholds in DORAConfig
 - **Missing DORA File**: Ensure the DORA legislation PDF is in the root directory with the exact name "CELEX_32022R2554_EN_TXT.pdf"
-- **No Policies Found**: Make sure your policy PDFs are in the "policies" folder
+- **No Policies Found**: Make sure your policy PDFs are in the "policies" folder. The folder will be created automatically on first run, but you need to manually add your PDF files to it before analysis.
 
 ## Example Command Sequence
 
@@ -184,8 +188,14 @@ python -m spacy download en_core_web_lg
 # Download DORA legislation if needed
 # wget https://eur-lex.europa.eu/legal-content/EN/TXT/PDF/?uri=CELEX:32022R2554 -O CELEX_32022R2554_EN_TXT.pdf
 
-# Create policies directory and add your PDFs
-mkdir -p policies
+# The policies folder will be created automatically on first run
+# You can check if it exists or create it manually
+if [ ! -d "policies" ]; then
+    mkdir -p policies
+    echo "Created policies folder. Please add your policy PDFs here."
+fi
+
+# Add your policy documents to the policies folder
 cp /path/to/your/policies/*.pdf policies/
 
 # Run the analyzer
