@@ -26,34 +26,13 @@ from filelock import FileLock
 import psutil
 import gc
 from sentence_transformers import SentenceTransformer
-#from transformers import util
 import hashlib
 from functools import partial
-from .dora_processor import process_policy
 
-# Add validation for dora_processor module
-try:
-    from .dora_processor import process_policy
-except ImportError:
-    # Define fallback process_policy function if module is missing
-    def process_policy(policy_path, dora_path):
-        """Fallback function for processing policy documents if dora_processor is not available.
-        
-        Args:
-            policy_path: Path to the policy PDF to analyze
-            dora_path: Path to the DORA legislation PDF
-            
-        Returns:
-            Dict with analysis results
-        """
-        logger = logging.getLogger('DORAAnalyzer')
-        logger.error(f"dora_processor module not found - using fallback for {policy_path}")
-        
-        return {
-            'success': False,
-            'policy_name': os.path.basename(policy_path),
-            'error': "dora_processor module not found"
-        }
+# Remove import from dora_processor
+# from .dora_processor import process_policy
+
+# Remove the fallback implementation since we're adding the real implementation
 
 
 def setup_logging(log_file: str = "dora_analyzer.log"):
@@ -2269,6 +2248,98 @@ def retry_failed_policies(failed_policies: List[Dict], dora_path: str, retries: 
     
     logger.info(f"Retry processing summary: {len(successful_retries)} succeeded, {len(remaining_failures)} still failed")
     return successful_retries
+
+def process_policy(policy_path: str, dora_path: str) -> Dict:
+    """Process a policy document against DORA requirements.
+    
+    This function analyzes a policy document for compliance with DORA's RTS and ITS requirements.
+    
+    Args:
+        policy_path: Path to the policy PDF to analyze
+        dora_path: Path to the DORA legislation PDF
+        
+    Returns:
+        Dict with analysis results including:
+        - success (bool): Whether analysis was successful
+        - policy_name (str): Name of the policy file
+        - policy_path (str): Path to the policy file
+        - rts_coverage (float): Percentage of RTS requirements covered
+        - its_coverage (float): Percentage of ITS requirements covered
+        - overall_coverage (float): Overall coverage percentage
+        - analysis_timestamp (str): When the analysis was performed
+    """
+    logger = logging.getLogger('DORAAnalyzer')
+    logger.info(f"Processing policy: {os.path.basename(policy_path)}")
+    
+    try:
+        # Extract text from policy document
+        with pdfplumber.open(policy_path) as pdf:
+            policy_text = ""
+            for page in pdf.pages:
+                page_text = page.extract_text() or ""
+                policy_text += page_text + "\n\n"
+        
+        if not policy_text.strip():
+            logger.error(f"Failed to extract text from {policy_path}")
+            return {
+                'success': False,
+                'policy_name': os.path.basename(policy_path),
+                'policy_path': policy_path,
+                'error': "Failed to extract text from PDF"
+            }
+            
+        # Clean and normalize the extracted text
+        policy_text = TextProcessor.clean_text(policy_text)
+        
+        # Initialize the analyzer
+        analyzer = DORAComplianceAnalyzer(dora_path)
+        
+        # Extract RTS and ITS requirements if not done already
+        if not analyzer.extract_technical_standards():
+            logger.error(f"Failed to extract technical standards from DORA")
+            return {
+                'success': False,
+                'policy_name': os.path.basename(policy_path),
+                'policy_path': policy_path,
+                'error': "Failed to extract technical standards from DORA"
+            }
+        
+        # Analyze the policy document against DORA requirements
+        policy_name = os.path.basename(policy_path)
+        analysis_results = analyzer.analyze_policy_document(policy_name, policy_text)
+        
+        if not analysis_results.get('analysis_complete', False):
+            logger.error(f"Analysis failed for {policy_name}: {analysis_results.get('error', 'Unknown error')}")
+            return {
+                'success': False,
+                'policy_name': policy_name,
+                'policy_path': policy_path,
+                'error': analysis_results.get('error', 'Analysis failed')
+            }
+            
+        # Create success response
+        return {
+            'success': True,
+            'policy_name': policy_name,
+            'policy_path': policy_path,
+            'rts_coverage': analysis_results.get('rts_coverage', 0.0),
+            'its_coverage': analysis_results.get('its_coverage', 0.0),
+            'overall_coverage': (analysis_results.get('rts_coverage', 0.0) + analysis_results.get('its_coverage', 0.0)) / 2,
+            'total_rts': analysis_results.get('total_rts', 0),
+            'covered_rts': analysis_results.get('covered_rts', 0),
+            'total_its': analysis_results.get('total_its', 0),
+            'covered_its': analysis_results.get('covered_its', 0),
+            'analysis_timestamp': datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Error processing {os.path.basename(policy_path)}: {str(e)}", exc_info=True)
+        return {
+            'success': False,
+            'policy_name': os.path.basename(policy_path),
+            'policy_path': policy_path,
+            'error': str(e)
+        }
 
 def main():
     """Main function to run the DORA compliance analyzer."""
