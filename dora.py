@@ -84,7 +84,7 @@ class DORAConfig:
     MIN_SENTENCE_WORDS = 5
     
     # LLM settings
-    ZERO_SHOT_MODEL = "microsoft/deberta-v3-base-mnli"  # Better model for regulatory text classification - improved accuracy and faster inference than BART
+    ZERO_SHOT_MODEL = "microsoft/deberta-base-mnli"  # Better model for regulatory text classification - improved accuracy and faster inference than BART
     LLM_THRESHOLD = 0.5  # Confidence threshold for predictions
     
     # File patterns
