@@ -84,7 +84,7 @@ class DORAConfig:
     MIN_SENTENCE_WORDS = 5
     
     # LLM settings
-    ZERO_SHOT_MODEL = "microsoft/deberta-base-mnli"  # Better model for regulatory text classification - improved accuracy and faster inference than BART
+    ZERO_SHOT_MODEL = "nlpaueb/legal-bert-base-uncased"  # Legal domain-specific model for better recognition of legal and regulatory terminology
     LLM_THRESHOLD = 0.5  # Confidence threshold for predictions
     
     # File patterns
@@ -912,7 +912,7 @@ class DORAComplianceAnalyzer:
                                           model=DORAConfig.ZERO_SHOT_MODEL)
         
         # Initialize sentence transformer for similarity calculations
-        self.sentence_transformer = SentenceTransformer('all-MiniLM-L6-v2')
+        self.sentence_transformer = SentenceTransformer('sentence-transformers/all-mpnet-base-v2')  
     
     def __enter__(self):
         """Context manager entry."""
@@ -1714,9 +1714,21 @@ class DORAComplianceAnalyzer:
             
             total_covered = 0
             policy_coverage_stats = {}
+            policy_focus_areas = {}
             
-            # Process policy coverage statistics
+            # Process policy coverage statistics and determine policy focus areas
             for policy_name, coverage in self.policy_coverage.items():
+                # Extract policy text from first result if available
+                policy_text = ""
+                if coverage['rts_results']:
+                    policy_text = coverage['rts_results'][0].get('full_context', '')
+                elif coverage['its_results']:
+                    policy_text = coverage['its_results'][0].get('full_context', '')
+                
+                # Determine policy focus areas
+                focus_areas = self._determine_policy_focus_areas(policy_name, policy_text)
+                policy_focus_areas[policy_name] = focus_areas
+                
                 rts_covered = sum(1 for r in coverage['rts_results'] if r.get('covered', False))
                 its_covered = sum(1 for r in coverage['its_results'] if r.get('covered', False))
                 total_covered = max(total_covered, rts_covered + its_covered)
@@ -1726,7 +1738,8 @@ class DORAComplianceAnalyzer:
                     'its_covered': its_covered,
                     'total_covered': rts_covered + its_covered,
                     'rts_total': len(coverage['rts_results']),
-                    'its_total': len(coverage['its_results'])
+                    'its_total': len(coverage['its_results']),
+                    'focus_areas': focus_areas
                 }
             
             # Calculate overall coverage
@@ -1735,7 +1748,8 @@ class DORAComplianceAnalyzer:
             # Add summary statistics to report
             sections.append(f"Overall compliance coverage: {overall_coverage:.2f}%")
             sections.append(f"Total requirements analyzed: {total_requirements}")
-            sections.append(f"Requirements covered: {total_covered}\n")
+            sections.append(f"Requirements covered: {total_covered}")
+            sections.append(f"Requirements with gaps: {total_requirements - total_covered}\n")
             
             # Policy Coverage Summary
             sections.append("## Policy Coverage Summary")
@@ -1743,6 +1757,10 @@ class DORAComplianceAnalyzer:
             # Process each policy's coverage statistics
             for policy_name, stats in policy_coverage_stats.items():
                 sections.append(f"### {policy_name}")
+                
+                # Add policy focus areas
+                focus_areas_display = [area.replace('_', ' ').title() for area in stats['focus_areas']]
+                sections.append(f"**Policy Focus Areas**: {', '.join(focus_areas_display)}")
                 
                 # Calculate coverage percentages
                 rts_coverage = (stats['rts_covered']/stats['rts_total']*100) if stats['rts_total'] > 0 else 0
@@ -1755,6 +1773,197 @@ class DORAComplianceAnalyzer:
                 sections.append(f"- ITS Requirements Covered: {stats['its_covered']}/{stats['its_total']} ({its_coverage:.2f}%)")
                 sections.append(f"- Total Requirements Covered: {stats['total_covered']}/{stats['rts_total'] + stats['its_total']} ({total_coverage:.2f}%)\n")
             
+            # Generate detailed gap analysis by article
+            sections.append("## Detailed Gap Analysis")
+            sections.append("\nThis section identifies specific DORA articles and requirements that are not adequately covered by existing policies.\n")
+            
+            # Collect all gaps across policies
+            rts_gaps = {}
+            its_gaps = {}
+            
+            for policy_name, coverage in self.policy_coverage.items():
+                # Get policy focus areas
+                focus_areas = policy_focus_areas.get(policy_name, ['general'])
+                
+                # Process RTS gaps
+                for result in coverage.get('rts_results', []):
+                    if not result.get('covered', False):
+                        article_num = result.get('article_num', 'Unknown')
+                        requirement_area = result.get('policy_area', 'general')
+                        
+                        # Determine if this gap is relevant to this policy's focus
+                        is_relevant_to_policy = requirement_area in focus_areas or 'general' in focus_areas
+                        
+                        if article_num not in rts_gaps:
+                            rts_gaps[article_num] = []
+                        
+                        # Add gap details
+                        rts_gaps[article_num].append({
+                            'requirement_text': result.get('requirement_text', 'Unknown requirement'),
+                            'similarity_score': result.get('similarity_score', 0.0),
+                            'policy_name': policy_name,
+                            'policy_area': requirement_area,
+                            'is_relevant_to_policy': is_relevant_to_policy,
+                            'policy_focus_areas': focus_areas
+                        })
+                
+                # Process ITS gaps
+                for result in coverage.get('its_results', []):
+                    if not result.get('covered', False):
+                        article_num = result.get('article_num', 'Unknown')
+                        requirement_area = result.get('policy_area', 'general')
+                        
+                        # Determine if this gap is relevant to this policy's focus
+                        is_relevant_to_policy = requirement_area in focus_areas or 'general' in focus_areas
+                        
+                        if article_num not in its_gaps:
+                            its_gaps[article_num] = []
+                        
+                        # Add gap details
+                        its_gaps[article_num].append({
+                            'requirement_text': result.get('requirement_text', 'Unknown requirement'),
+                            'similarity_score': result.get('similarity_score', 0.0),
+                            'policy_name': policy_name,
+                            'policy_area': requirement_area,
+                            'is_relevant_to_policy': is_relevant_to_policy,
+                            'policy_focus_areas': focus_areas
+                        })
+            
+            # Report RTS gaps by article
+            if rts_gaps:
+                sections.append("### Regulatory Technical Standards (RTS) Gaps")
+                for article_num in sorted(rts_gaps.keys()):
+                    sections.append(f"\n#### Article {article_num}")
+                    
+                    # Separate relevant and non-relevant gaps
+                    relevant_gaps = [g for g in rts_gaps[article_num] if g['is_relevant_to_policy']]
+                    non_relevant_gaps = [g for g in rts_gaps[article_num] if not g['is_relevant_to_policy']]
+                    
+                    # Process relevant gaps first
+                    if relevant_gaps:
+                        sections.append("\n**Relevant Gaps (missing in policies that should cover this):**")
+                        for i, gap in enumerate(relevant_gaps, 1):
+                            sections.append(f"\n**Gap {i}:**")
+                            sections.append(f"- **Requirement:** {gap['requirement_text']}")
+                            sections.append(f"- **Policy:** {gap['policy_name']}")
+                            sections.append(f"- **Policy Focus Areas:** {', '.join([a.replace('_', ' ').title() for a in gap['policy_focus_areas']])}")
+                            sections.append(f"- **Requirement Area:** {gap['policy_area'].replace('_', ' ').title()}")
+                            sections.append(f"- **Best Match Score:** {gap['similarity_score']:.2f}")
+                            
+                            # Add gap reason based on similarity score
+                            if gap['similarity_score'] < 0.3:
+                                reason = "No significant coverage found despite being within policy scope"
+                            elif gap['similarity_score'] < 0.5:
+                                reason = "Minimal coverage found, but falls well below the threshold for compliance"
+                            else:
+                                reason = "Partial coverage found, but insufficient to meet compliance requirements"
+                            
+                            sections.append(f"- **Gap Reason:** {reason}")
+                            
+                            # Add recommendation
+                            if gap['similarity_score'] < 0.3:
+                                recommendation = f"Add a section to {gap['policy_name']} specifically addressing this requirement"
+                            elif gap['similarity_score'] < 0.5:
+                                recommendation = f"Significantly enhance {gap['policy_name']} to better address this requirement"
+                            else:
+                                recommendation = f"Update {gap['policy_name']} to more explicitly address this requirement"
+                            
+                            sections.append(f"- **Recommendation:** {recommendation}")
+                    
+                    # Process non-relevant gaps (for information only)
+                    if non_relevant_gaps:
+                        sections.append("\n**Informational Gaps (outside policy scope, covered elsewhere):**")
+                        for i, gap in enumerate(non_relevant_gaps, 1):
+                            sections.append(f"\n**Info {i}:**")
+                            sections.append(f"- **Requirement:** {gap['requirement_text']}")
+                            sections.append(f"- **Policy:** {gap['policy_name']}")
+                            sections.append(f"- **Policy Focus Areas:** {', '.join([a.replace('_', ' ').title() for a in gap['policy_focus_areas']])}")
+                            sections.append(f"- **Requirement Area:** {gap['policy_area'].replace('_', ' ').title()}")
+                            sections.append(f"- **Note:** This requirement is outside the scope of this policy and should be covered by a dedicated {gap['policy_area'].replace('_', ' ')} policy")
+            else:
+                sections.append("### No RTS Gaps Identified\n")
+            
+            # Report ITS gaps by article
+            if its_gaps:
+                sections.append("\n### Implementing Technical Standards (ITS) Gaps")
+                for article_num in sorted(its_gaps.keys()):
+                    sections.append(f"\n#### Article {article_num}")
+                    
+                    # Separate relevant and non-relevant gaps
+                    relevant_gaps = [g for g in its_gaps[article_num] if g['is_relevant_to_policy']]
+                    non_relevant_gaps = [g for g in its_gaps[article_num] if not g['is_relevant_to_policy']]
+                    
+                    # Process relevant gaps first
+                    if relevant_gaps:
+                        sections.append("\n**Relevant Gaps (missing in policies that should cover this):**")
+                        for i, gap in enumerate(relevant_gaps, 1):
+                            sections.append(f"\n**Gap {i}:**")
+                            sections.append(f"- **Requirement:** {gap['requirement_text']}")
+                            sections.append(f"- **Policy:** {gap['policy_name']}")
+                            sections.append(f"- **Policy Focus Areas:** {', '.join([a.replace('_', ' ').title() for a in gap['policy_focus_areas']])}")
+                            sections.append(f"- **Requirement Area:** {gap['policy_area'].replace('_', ' ').title()}")
+                            sections.append(f"- **Best Match Score:** {gap['similarity_score']:.2f}")
+                            
+                            # Add gap reason based on similarity score
+                            if gap['similarity_score'] < 0.3:
+                                reason = "No implementation procedures found despite being within policy scope"
+                            elif gap['similarity_score'] < 0.5:
+                                reason = "Some implementation details found, but falls well below the threshold for compliance"
+                            else:
+                                reason = "Partial implementation details found, but insufficient to meet compliance requirements"
+                            
+                            sections.append(f"- **Gap Reason:** {reason}")
+                            
+                            # Add recommendation
+                            if gap['similarity_score'] < 0.3:
+                                recommendation = f"Add implementation procedures to {gap['policy_name']} for this requirement"
+                            elif gap['similarity_score'] < 0.5:
+                                recommendation = f"Enhance implementation details in {gap['policy_name']} for this requirement"
+                            else:
+                                recommendation = f"Expand existing implementation procedures in {gap['policy_name']} for this requirement"
+                            
+                            sections.append(f"- **Recommendation:** {recommendation}")
+                    
+                    # Process non-relevant gaps (for information only)
+                    if non_relevant_gaps:
+                        sections.append("\n**Informational Gaps (outside policy scope, covered elsewhere):**")
+                        for i, gap in enumerate(non_relevant_gaps, 1):
+                            sections.append(f"\n**Info {i}:**")
+                            sections.append(f"- **Requirement:** {gap['requirement_text']}")
+                            sections.append(f"- **Policy:** {gap['policy_name']}")
+                            sections.append(f"- **Policy Focus Areas:** {', '.join([a.replace('_', ' ').title() for a in gap['policy_focus_areas']])}")
+                            sections.append(f"- **Requirement Area:** {gap['policy_area'].replace('_', ' ').title()}")
+                            sections.append(f"- **Note:** This requirement is outside the scope of this policy and should be covered by a dedicated {gap['policy_area'].replace('_', ' ')} policy")
+            else:
+                sections.append("### No ITS Gaps Identified\n")
+            
+            # Add recommendation summary
+            sections.append("\n## Recommendations Summary")
+            sections.append("\nBased on the identified gaps, the following high-level recommendations are provided:\n")
+            
+            # Generate high-level recommendations
+            if overall_coverage < 50:
+                sections.append("1. **Critical Action Required**: Develop comprehensive DORA compliance policies and procedures")
+                sections.append("2. Prioritize addressing RTS requirements with zero or minimal coverage")
+                sections.append("3. Establish a DORA compliance program with regular assessments")
+            elif overall_coverage < 75:
+                sections.append("1. **Significant Enhancements Needed**: Update existing policies to address identified gaps")
+                sections.append("2. Develop implementation procedures for ITS requirements")
+                sections.append("3. Conduct regular gap assessments as DORA requirements evolve")
+            else:
+                sections.append("1. **Refinement Recommended**: Fine-tune policies to address specific gaps")
+                sections.append("2. Ensure implementation procedures are clearly documented")
+                sections.append("3. Maintain ongoing compliance monitoring")
+            
+            # Add next steps
+            sections.append("\n### Next Steps")
+            sections.append("\nTo address the identified gaps, consider the following steps:\n")
+            sections.append("1. Prioritize gaps based on risk and implementation effort")
+            sections.append("2. Develop an action plan with clear ownership and timelines")
+            sections.append("3. Consider engaging compliance specialists for complex requirements")
+            sections.append("4. Re-assess compliance after implementing changes")
+            sections.append("5. Establish a monitoring process to maintain compliance as regulations evolve")
+            
             # Write report to file
             self.logger.info(f"Writing report to {report_path}...")
             with open(report_path, 'w', encoding='utf-8') as f:
@@ -1766,6 +1975,59 @@ class DORAComplianceAnalyzer:
         except Exception as e:
             self.logger.error(f"Error generating gap analysis report: {str(e)}", exc_info=True)
             return "Error generating report"
+
+    def _determine_policy_focus_areas(self, policy_name: str, policy_text: str) -> List[str]:
+        """
+        Determine the primary focus areas of a policy based on its title and content.
+        
+        Args:
+            policy_name: Name of the policy document
+            policy_text: Text content of the policy
+            
+        Returns:
+            List of policy areas that are the focus of this document
+        """
+        focus_areas = []
+        policy_name_lower = policy_name.lower()
+        
+        # Map of keywords to policy areas
+        focus_area_keywords = {
+            'authentication_security': ['authentication', 'access control', 'identity', 'password', 'credential', 'login', 'biometric'],
+            'data_protection': ['data protection', 'data security', 'confidentiality', 'privacy', 'gdpr', 'data breach', 'encryption'],
+            'incident_response': ['incident', 'breach', 'response', 'detection', 'sirt', 'csirt', 'security event'],
+            'risk_management': ['risk', 'threat', 'vulnerability', 'assessment', 'control', 'mitigation', 'management'],
+            'business_continuity': ['continuity', 'recovery', 'disaster', 'resilience', 'bcp', 'drp', 'backup', 'restore'],
+            'supply_chain': ['vendor', 'third party', 'supplier', 'outsource', 'service provider', 'contractor', 'third-party'],
+            'governance': ['governance', 'compliance', 'policy', 'procedure', 'standard', 'oversight', 'accountability']
+        }
+        
+        # Check title for obvious focus areas
+        for area, keywords in focus_area_keywords.items():
+            if any(keyword in policy_name_lower for keyword in keywords):
+                focus_areas.append(area)
+        
+        # If no clear areas from title, analyze content
+        if not focus_areas:
+            # Count keyword occurrences in text
+            area_scores = {area: 0 for area in focus_area_keywords.keys()}
+            
+            for area, keywords in focus_area_keywords.items():
+                for keyword in keywords:
+                    area_scores[area] += policy_text.lower().count(keyword)
+            
+            # Find the top 2 areas by keyword occurrence
+            top_areas = sorted(area_scores.items(), key=lambda x: x[1], reverse=True)[:2]
+            
+            # Only include areas with significant scores
+            for area, score in top_areas:
+                if score > 5:  # Threshold for significance
+                    focus_areas.append(area)
+        
+        # Always include 'general' for broadly applicable policies
+        if not focus_areas or any(term in policy_name_lower for term in ['general', 'framework', 'program', 'overall']):
+            focus_areas.append('general')
+        
+        return focus_areas
 
     def _identify_policy_area(self, text: str) -> str:
         """Identify the policy area using zero-shot classification and keyword analysis."""
@@ -2341,6 +2603,86 @@ def process_policy(policy_path: str, dora_path: str) -> Dict:
             'error': str(e)
         }
 
+def is_dora_relevant(policy_path: str) -> Tuple[bool, str]:
+    """
+    Screen a policy document to determine if it's relevant to DORA compliance.
+    
+    Args:
+        policy_path: Path to the policy PDF to screen
+        
+    Returns:
+        Tuple containing:
+        - Boolean indicating if the document is relevant
+        - Reason for the decision
+    """
+    logger = logging.getLogger('DORAAnalyzer')
+    logger.info(f"Screening document for DORA relevance: {os.path.basename(policy_path)}")
+    
+    try:
+        # Extract text from policy document (first 10 pages or all if fewer)
+        with pdfplumber.open(policy_path) as pdf:
+            policy_text = ""
+            max_pages = min(10, len(pdf.pages))  # Only check first 10 pages for efficiency
+            for i in range(max_pages):
+                page_text = pdf.pages[i].extract_text() or ""
+                policy_text += page_text + "\n\n"
+        
+        if not policy_text.strip():
+            return False, "Failed to extract text from PDF"
+            
+        # Clean the extracted text
+        policy_text = TextProcessor.clean_text(policy_text)
+        
+        # DORA-specific keywords and phrases
+        dora_keywords = [
+            "digital operational resilience", "DORA", "operational resilience",
+            "ict risk management", "cyber security", "cyber resilience",
+            "ICT third party risk", "ICT incident management", "ICT business continuity",
+            "financial entity", "critical ICT service provider", "digital testing",
+            "regulatory technical standards", "implementing technical standards",
+            "RTS", "ITS", "cyber attack", "operational incident", "information security"
+        ]
+        
+        # Check for DORA keywords
+        keyword_matches = []
+        for keyword in dora_keywords:
+            if keyword.lower() in policy_text.lower():
+                keyword_matches.append(keyword)
+        
+        # If we have multiple keyword matches, it's likely relevant
+        if len(keyword_matches) >= 3:
+            return True, f"Found DORA-related keywords: {', '.join(keyword_matches[:5])}"
+        
+        # If fewer matches, do deeper analysis
+        if len(keyword_matches) > 0:
+            # Check for sections about compliance, risk management, or security
+            compliance_patterns = [
+                r"(?i)compliance\s+with\s+regulatory",
+                r"(?i)regulatory\s+compliance",
+                r"(?i)security\s+policies",
+                r"(?i)risk\s+management\s+framework",
+                r"(?i)incident\s+response",
+                r"(?i)business\s+continuity",
+                r"(?i)disaster\s+recovery",
+                r"(?i)third.party\s+management"
+            ]
+            
+            for pattern in compliance_patterns:
+                if re.search(pattern, policy_text):
+                    return True, f"Found DORA-related content with {len(keyword_matches)} keywords"
+        
+        # If document is very short, it's likely not a full policy document
+        if len(policy_text.split()) < 500:  # Fewer than 500 words
+            return False, "Document too short to be a comprehensive policy"
+        
+        # Default to not relevant if few matches
+        return False, f"Insufficient DORA-related content ({len(keyword_matches)} keyword matches)"
+            
+    except Exception as e:
+        logger.error(f"Error screening {os.path.basename(policy_path)}: {str(e)}", exc_info=True)
+        return False, f"Error during screening: {str(e)}"
+
+
 def main():
     """Main function to run the DORA compliance analyzer."""
     logger = logging.getLogger('DORAAnalyzer')
@@ -2371,13 +2713,39 @@ def main():
         
         # Get all PDF files from the folder
         logger.info(f"Scanning for policy documents in: {policy_folder}")
-        pdf_files = list(Path(policy_folder).glob("**/*.pdf"))
+        all_pdf_files = list(Path(policy_folder).glob("**/*.pdf"))
         
-        if not pdf_files:
+        if not all_pdf_files:
             logger.warning("No PDF files found in the specified folder!")
             return
         
-        logger.info(f"Found {len(pdf_files)} policy documents")
+        logger.info(f"Found {len(all_pdf_files)} policy documents, screening for DORA relevance...")
+        
+        # Screen documents for DORA relevance
+        relevant_files = []
+        irrelevant_files = []
+        
+        for pdf_file in tqdm(all_pdf_files, desc="Screening documents", disable=DORAConfig.PROGRESS_BAR_DISABLE):
+            is_relevant, reason = is_dora_relevant(str(pdf_file))
+            if is_relevant:
+                relevant_files.append(pdf_file)
+                logger.info(f"Relevant: {pdf_file.name} - {reason}")
+            else:
+                irrelevant_files.append((pdf_file, reason))
+                logger.info(f"Not relevant: {pdf_file.name} - {reason}")
+        
+        # Log screening results
+        if irrelevant_files:
+            logger.info("\nThe following files were determined to be not relevant to DORA and will be skipped:")
+            for file, reason in irrelevant_files:
+                logger.info(f"- {file.name}: {reason}")
+        
+        pdf_files = relevant_files
+        logger.info(f"\nProceeding with {len(pdf_files)} DORA-relevant documents")
+        
+        if not pdf_files:
+            logger.warning("No DORA-relevant policy documents found!")
+            return
         
         # Set up multiprocessing
         num_processes = min(cpu_count(), len(pdf_files))
