@@ -287,10 +287,9 @@ Before running the analyzer, ensure your files are organized as follows:
 📁 Your Upload Package:
 ├── CELEX_32022R2554_EN_TXT.pdf (DORA legislation)
 ├── setup_and_run.py (main orchestrator)
-├── WorkShop/
-│   ├── dora.py (main analyzer)
-│   ├── dora_domains.py (domain definitions)
-│   └── dora_workbook_integration.py (domain analysis)
+│   dora.py (main analyzer)
+│   dora_domains.py (domain definitions)
+│   dora_workbook_integration.py (domain analysis)
 └── policies/
     ├── your_policy_1.pdf
     ├── your_policy_2.pdf
