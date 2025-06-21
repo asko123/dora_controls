@@ -2,6 +2,77 @@
 
 A comprehensive tool for analyzing compliance with the Digital Operational Resilience Act (DORA - EU Regulation 2022/2554) by identifying gaps between your organization's policies and DORA requirements.
 
+## How to Run the DORA Controls Analyzer
+
+Choose the deployment method that best fits your needs:
+
+### 🚀 Option 1: Kubernetes Deployment (Recommended for Production)
+
+**Best for:** Production environments, scalable processing, cloud deployments
+
+```bash
+# Prerequisites: Kubernetes cluster with kubectl configured
+git clone https://github.com/asko123/dora_controls.git
+cd dora_controls
+
+# Quick deployment
+chmod +x k8s/deploy.sh
+./k8s/deploy.sh
+
+# Add your policy files
+kubectl cp policies/ dora-analyzer/$(kubectl get pods -n dora-analyzer -l app=dora-analyzer -o jsonpath='{.items[0].metadata.name}'):/app/policies/
+
+# Run analysis (choose CPU or GPU)
+kubectl apply -f k8s/job-cpu.yaml     # For CPU processing
+kubectl apply -f k8s/job-gpu.yaml     # For GPU processing (faster)
+
+# Monitor progress and get results
+kubectl logs -f job/dora-analyzer-cpu -n dora-analyzer
+kubectl cp dora-analyzer/$(kubectl get pods -n dora-analyzer -l app=dora-analyzer -o jsonpath='{.items[0].metadata.name}'):/app/analysis_output/ ./results/
+```
+
+### 🖥️ Option 2: Local Automated Setup (Easiest for Testing)
+
+**Best for:** Quick testing, development, single-use analysis
+
+```bash
+git clone https://github.com/asko123/dora_controls.git
+cd dora_controls
+
+# Add your policy documents
+mkdir -p policies
+cp /path/to/your/policies/*.pdf policies/
+
+# Run automated setup (handles everything automatically)
+python setup_and_run.py  # or ./setup_and_run.sh on Linux/macOS
+```
+
+### ⚙️ Option 3: Manual Local Setup (Advanced Users)
+
+**Best for:** Custom configurations, development, troubleshooting
+
+```bash
+git clone https://github.com/asko123/dora_controls.git
+cd dora_controls
+
+# Set up environment
+python -m venv venv
+source venv/bin/activate  # or venv\Scripts\activate on Windows
+
+# Install dependencies (GPU recommended for 5-10x faster processing)
+pip install -r requirements-gpu.txt  # For GPU support
+# OR
+pip install -r requirements-cpu.txt  # For CPU-only
+
+# Download required models
+python -m spacy download en_core_web_lg
+
+# Add your policies and run
+mkdir -p policies
+cp /path/to/your/policies/*.pdf policies/
+python dora.py
+```
+
 ## Overview
 
 The DORA Compliance Analyzer processes the official DORA legislation (CELEX_32022R2554_EN_TXT.pdf) and compares it against your organization's policy documents to:
@@ -412,14 +483,25 @@ analyzer.extract_technical_standards()
 analyzer.generate_gap_analysis_report()
 ```
 
-## Quick Start Guide
+## Detailed Setup Instructions
 
-### Option 1: Automated Setup (Easiest - Recommended)
+### Local Installation Requirements
 
-**Just download and run - no manual configuration needed!**
+**⚠️ Important: GPU Support Highly Recommended**
+
+The DORA Controls Analyzer uses intensive NLP models that process large amounts of text. **GPU acceleration provides 5-10x faster processing** compared to CPU-only mode.
+
+#### Prerequisites for Local Setup
+- Python 3.8+ (Python 3.11 recommended)
+- For GPU support: NVIDIA GPU with CUDA 11.8+ and at least 4GB GPU memory
+- At least 8GB system RAM
+- 5GB free disk space for models and dependencies
+
+#### Automated Local Setup (Recommended)
+
+The easiest way to get started locally:
 
 ```bash
-# Clone repository
 git clone https://github.com/asko123/dora_controls.git
 cd dora_controls
 
@@ -427,57 +509,53 @@ cd dora_controls
 mkdir -p policies
 cp /path/to/your/policies/*.pdf policies/
 
-# Download DORA legislation (if needed)
-# wget https://eur-lex.europa.eu/legal-content/EN/TXT/PDF/?uri=CELEX:32022R2554 -O CELEX_32022R2554_EN_TXT.pdf
-
-# Run the automated setup (Windows)
-setup_and_run.bat
-
-# OR run the automated setup (macOS/Linux)
-./setup_and_run.sh
-
-# That's it! The script handles everything else automatically.
+# Run automated setup - handles everything automatically
+python setup_and_run.py
 ```
 
-### Option 2: Manual Setup (Advanced Users)
+The automated setup script will:
+- Create a virtual environment
+- Install appropriate dependencies (GPU or CPU)
+- Download required ML models
+- Run the analysis automatically
 
-For advanced users who want manual control over the installation process:
+#### Manual Local Setup (Advanced)
 
-### With GPU Support (Recommended)
+For users who need custom configurations:
 
+**With GPU Support:**
 ```bash
-# Clone repository and navigate to it
 git clone https://github.com/asko123/dora_controls.git
 cd dora_controls
 
-# Set up Python environment
 python -m venv venv
-source venv/bin/activate  # or venv\Scripts\activate on Windows
+source venv/bin/activate  # Windows: venv\Scripts\activate
 
-# Install GPU dependencies (requires CUDA-compatible GPU)
 pip install -r requirements-gpu.txt
 python -m spacy download en_core_web_lg
 
-# Verify GPU is working
+# Verify GPU setup
 python -c "import torch; print(f'CUDA available: {torch.cuda.is_available()}')"
 
-# Create policies folder and add your PDFs
 mkdir -p policies
 cp /path/to/your/policies/*.pdf policies/
-
-# Download DORA legislation if needed
-# wget https://eur-lex.europa.eu/legal-content/EN/TXT/PDF/?uri=CELEX:32022R2554 -O CELEX_32022R2554_EN_TXT.pdf
-
-# Run the analyzer (will be fast with GPU!)
 python dora.py
 ```
 
-### Without GPU (CPU-Only, Slower)
-
+**CPU-Only Setup:**
 ```bash
-# Clone repository and navigate to it
 git clone https://github.com/asko123/dora_controls.git
 cd dora_controls
+
+python -m venv venv
+source venv/bin/activate  # Windows: venv\Scripts\activate
+
+pip install -r requirements-cpu.txt
+python -m spacy download en_core_web_lg
+
+mkdir -p policies
+cp /path/to/your/policies/*.pdf policies/
+python dora.py
 
 # Set up Python environment
 python -m venv venv
