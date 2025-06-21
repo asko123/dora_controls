@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dora-config
+  namespace: dora-analyzer
+data:
+  PYTHONPATH: "/app"
+  PYTHONUNBUFFERED: "1"
+  DORA_OUTPUT_DIR: "/app/analysis_output"
+  DORA_POLICIES_DIR: "/app/policies"

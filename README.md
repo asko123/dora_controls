@@ -775,3 +775,76 @@ The workbook analysis generates:
 - **Detailed Mapping**: Policy-to-requirement mappings with similarity scores
 
 The workbook functionality is ideal for compliance teams that need to map DORA requirements to specific controls and track compliance status across domains.
+
+## Kubernetes Deployment
+
+The DORA Controls Analyzer can be deployed in Kubernetes for scalable batch processing of compliance analysis.
+
+### Prerequisites
+- Kubernetes cluster with kubectl configured
+- Docker for building images
+- For GPU support: NVIDIA GPU Operator installed in cluster
+
+### Quick Start
+```bash
+# Build and deploy
+chmod +x k8s/deploy.sh
+./k8s/deploy.sh
+
+# Upload your policy files to the policies PVC
+kubectl cp policies/ dora-analyzer/$(kubectl get pods -n dora-analyzer -l app=dora-analyzer -o jsonpath='{.items[0].metadata.name}'):/app/policies/
+
+# Run CPU analysis
+kubectl apply -f k8s/job-cpu.yaml
+
+# Or run GPU analysis (if GPU nodes available)
+kubectl apply -f k8s/job-gpu.yaml
+
+# Monitor job progress
+kubectl logs -f job/dora-analyzer-cpu -n dora-analyzer
+
+# Retrieve results
+kubectl cp dora-analyzer/$(kubectl get pods -n dora-analyzer -l app=dora-analyzer -o jsonpath='{.items[0].metadata.name}'):/app/analysis_output/ ./results/
+```
+
+### Architecture
+- **CPU Variant**: Uses `Dockerfile.cpu` for CPU-only processing
+- **GPU Variant**: Uses `Dockerfile.gpu` with CUDA support for faster processing
+- **Storage**: Persistent volumes for policies, output, and model cache
+- **Jobs**: Kubernetes Jobs for batch processing with automatic retry
+
+### Resource Requirements
+- **CPU Jobs**: 4Gi-8Gi memory, 2-4 CPU cores
+- **GPU Jobs**: 6Gi-12Gi memory, 2-4 CPU cores, 1 GPU
+- **Storage**: 1Gi policies, 5Gi output, 2Gi cache
+
+### Container Images
+The deployment includes two Docker variants:
+- **CPU Image**: Built from `Dockerfile.cpu` using Python 3.11-slim base
+- **GPU Image**: Built from `Dockerfile.gpu` using NVIDIA CUDA 11.8 runtime
+
+### Deployment Files
+- `k8s/namespace.yaml`: Creates the dora-analyzer namespace
+- `k8s/configmap.yaml`: Environment variables configuration
+- `k8s/storage.yaml`: Persistent volume claims for data storage
+- `k8s/job-cpu.yaml`: CPU processing job definition
+- `k8s/job-gpu.yaml`: GPU processing job definition
+- `k8s/deploy.sh`: Automated deployment script
+
+### Usage Examples
+```bash
+# Check job status
+kubectl get jobs -n dora-analyzer
+
+# View job logs
+kubectl logs job/dora-analyzer-cpu -n dora-analyzer
+
+# Clean up completed jobs
+kubectl delete job dora-analyzer-cpu -n dora-analyzer
+kubectl delete job dora-analyzer-gpu -n dora-analyzer
+
+# Scale resources if needed
+kubectl patch job dora-analyzer-cpu -n dora-analyzer -p '{"spec":{"parallelism":2}}'
+```
+
+The Kubernetes deployment provides a scalable, containerized solution for running DORA compliance analysis in cloud environments with proper resource management and persistent storage.
