@@ -17,8 +17,8 @@ from sentence_transformers import SentenceTransformer
 from datetime import datetime
 
 # Import required modules from the main DORA analyzer
-from .dora import DORAComplianceAnalyzer, TextProcessor
-from .dora_domains import DORAWorkbook, create_dora_workbook
+from dora import DORAComplianceAnalyzer, TextProcessor
+from dora_domains import DORAWorkbook, create_dora_workbook
 
 class DORAWorkbookAnalyzer:
     """
@@ -407,4 +407,4 @@ if __name__ == "__main__":
     if report_path:
         print(f"Analysis complete. Report generated at: {report_path}")
     else:
-        print("Analysis failed. Check logs for details.") 
+        print("Analysis failed. Check logs for details.")  
