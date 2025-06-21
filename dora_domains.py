@@ -79,14 +79,240 @@ DORA_DOMAINS = [
 ]
 
 
+def load_domains_from_csv(csv_path: str = "dora_domains.csv") -> List[Dict[str, str]]:
+    """
+    Load DORA domains from a CSV file.
+    
+    The CSV format matches exactly what `export_to_csv()` produces, ensuring consistency 
+    and allowing users to export, modify, and re-import domains easily.
+    
+    CSV Format Requirements:
+    - Must contain exactly 4 columns: code, article, domain, requirement
+    - Each row must have non-empty values for all columns
+    - Domain codes must follow format like "RM 1.1", "IM 2.3", etc.
+    - Articles must follow format like "Art. 5", "Art. 17", etc.
+    - Domain categories must be valid DORA categories
+    - Minimum 40 domains required for complete DORA compliance
+    
+    Usage Examples:
+        domains = load_domains_from_csv()
+        
+        domains = load_domains_from_csv("custom_dora_domains.csv")
+        
+        # Handle loading errors
+        try:
+            domains = load_domains_from_csv("my_domains.csv")
+        except FileNotFoundError:
+            print("CSV file not found, using defaults")
+        except ValueError as e:
+            print(f"Invalid CSV format: {e}")
+    
+    Args:
+        csv_path: Path to the CSV file containing DORA domains.
+                 Defaults to "dora_domains.csv" in current directory.
+        
+    Returns:
+        List of domain dictionaries with keys: code, article, domain, requirement
+        
+    Raises:
+        FileNotFoundError: If the CSV file doesn't exist
+        ValueError: If the CSV file has invalid format or missing required columns
+        Exception: For other CSV reading errors
+    """
+    try:
+        if not os.path.exists(csv_path):
+            raise FileNotFoundError(f"CSV file not found: {csv_path}")
+        
+        df = pd.read_csv(csv_path)
+        
+        required_columns = ['code', 'article', 'domain', 'requirement']
+        missing_columns = [col for col in required_columns if col not in df.columns]
+        
+        if missing_columns:
+            raise ValueError(f"CSV file missing required columns: {missing_columns}")
+        
+        if df.empty:
+            raise ValueError("CSV file is empty")
+        
+        domains = []
+        for _, row in df.iterrows():
+            domain_dict = {
+                'code': str(row['code']).strip(),
+                'article': str(row['article']).strip(),
+                'domain': str(row['domain']).strip(),
+                'requirement': str(row['requirement']).strip()
+            }
+            
+            if not all(domain_dict.values()):
+                raise ValueError(f"Invalid domain entry with empty fields: {domain_dict}")
+            
+            domains.append(domain_dict)
+        
+        return domains
+        
+    except FileNotFoundError:
+        raise
+    except ValueError:
+        raise
+    except Exception as e:
+        raise Exception(f"Error reading CSV file {csv_path}: {str(e)}")
+
+
+def validate_csv_domains(domains: List[Dict[str, str]]) -> bool:
+    """
+    Validate that the loaded domains have the correct structure and content.
+    
+    Args:
+        domains: List of domain dictionaries to validate
+        
+    Returns:
+        True if validation passes
+        
+    Raises:
+        ValueError: If validation fails with specific error message
+    """
+    if not domains:
+        raise ValueError("Domain list is empty")
+    
+    if len(domains) < 40:
+        raise ValueError(f"Insufficient number of domains: {len(domains)}. Expected at least 40 domains.")
+    
+    required_keys = {'code', 'article', 'domain', 'requirement'}
+    valid_domain_categories = {
+        'ICT Risk Management', 'ICT Incident Management', 'Digital Testing',
+        'Third-Party Risk', 'Information Sharing', 'Competent Authorities',
+        'Business Continuity', 'Awareness & Training', 'Governance & Oversight'
+    }
+    
+    domain_codes = set()
+    
+    for i, domain in enumerate(domains):
+        if not isinstance(domain, dict):
+            raise ValueError(f"Domain at index {i} is not a dictionary: {type(domain)}")
+        
+        missing_keys = required_keys - set(domain.keys())
+        if missing_keys:
+            raise ValueError(f"Domain at index {i} missing required keys: {missing_keys}")
+        
+        for key, value in domain.items():
+            if not value or not str(value).strip():
+                raise ValueError(f"Domain at index {i} has empty value for key '{key}'")
+        
+        code = domain['code'].strip()
+        if not code or len(code.split()) != 2:
+            raise ValueError(f"Domain at index {i} has invalid code format: '{code}'. Expected format like 'RM 1.1'")
+        
+        if code in domain_codes:
+            raise ValueError(f"Duplicate domain code found: '{code}'")
+        domain_codes.add(code)
+        
+        article = domain['article'].strip()
+        if not article.startswith('Art. '):
+            raise ValueError(f"Domain at index {i} has invalid article format: '{article}'. Expected format like 'Art. 5'")
+        
+        domain_category = domain['domain'].strip()
+        if domain_category not in valid_domain_categories:
+            raise ValueError(f"Domain at index {i} has invalid domain category: '{domain_category}'. Valid categories: {valid_domain_categories}")
+        
+        requirement = domain['requirement'].strip()
+        if len(requirement) < 10:
+            raise ValueError(f"Domain at index {i} has requirement text that is too short: '{requirement}'")
+    
+    return True
+
+
+def validate_csv_file_format(csv_path: str) -> bool:
+    """
+    Validate CSV file format without fully loading the domains.
+    
+    Args:
+        csv_path: Path to the CSV file to validate
+        
+    Returns:
+        True if file format is valid
+        
+    Raises:
+        FileNotFoundError: If file doesn't exist
+        ValueError: If file format is invalid
+    """
+    if not os.path.exists(csv_path):
+        raise FileNotFoundError(f"CSV file not found: {csv_path}")
+    
+    try:
+        df = pd.read_csv(csv_path, nrows=0)
+        
+        # Check required columns
+        required_columns = ['code', 'article', 'domain', 'requirement']
+        missing_columns = [col for col in required_columns if col not in df.columns]
+        
+        if missing_columns:
+            raise ValueError(f"CSV file missing required columns: {missing_columns}")
+        
+        # Check for extra unexpected columns
+        extra_columns = [col for col in df.columns if col not in required_columns]
+        if extra_columns:
+            raise ValueError(f"CSV file contains unexpected columns: {extra_columns}")
+        
+        df_sample = pd.read_csv(csv_path, nrows=5)
+        
+        if df_sample.empty:
+            raise ValueError("CSV file appears to be empty")
+        
+        if df_sample.isnull().all(axis=1).any():
+            raise ValueError("CSV file contains completely empty rows")
+        
+        return True
+        
+    except pd.errors.EmptyDataError:
+        raise ValueError("CSV file is empty or has no data")
+    except pd.errors.ParserError as e:
+        raise ValueError(f"CSV file has parsing errors: {str(e)}")
+    except Exception as e:
+        raise ValueError(f"Error validating CSV file format: {str(e)}")
+
+
 class DORAWorkbook:
     """
     Class to handle DORA domains workbook operations
     """
     
-    def __init__(self):
-        """Initialize the workbook with the DORA domains"""
-        self.domains = DORA_DOMAINS
+    def __init__(self, csv_path: str = None):
+        """
+        Initialize the workbook with DORA domains from CSV or fallback to hardcoded.
+        
+        This constructor supports flexible domain loading:
+        1. If csv_path is provided: Load from specified CSV file with fallback to hardcoded
+        2. If csv_path is None: Try default 'dora_domains.csv', silently fallback to hardcoded
+        
+        The CSV format matches exactly what `export_to_csv()` produces, ensuring consistency.
+        
+        Usage Examples:
+            workbook = DORAWorkbook()
+            
+            workbook = DORAWorkbook("my_custom_domains.csv")
+            
+            workbook = DORAWorkbook("nonexistent.csv")  # Will fallback and warn
+        
+        Args:
+            csv_path: Optional path to CSV file containing DORA domains.
+                     If None, tries to load from default 'dora_domains.csv',
+                     falls back to hardcoded domains if CSV loading fails.
+                     If specified but loading fails, prints warning and falls back.
+        """
+        if csv_path:
+            try:
+                self.domains = load_domains_from_csv(csv_path)
+                print(f"Successfully loaded {len(self.domains)} domains from {csv_path}")
+            except Exception as e:
+                print(f"Warning: Failed to load domains from {csv_path}: {e}")
+                print("Falling back to hardcoded domains")
+                self.domains = DORA_DOMAINS
+        else:
+            try:
+                self.domains = load_domains_from_csv()
+                print(f"Successfully loaded {len(self.domains)} domains from default CSV file")
+            except Exception:
+                self.domains = DORA_DOMAINS
         
     def get_domains_by_category(self) -> Dict[str, List[Dict]]:
         """Group domains by their main category"""
@@ -171,9 +397,35 @@ class DORAWorkbook:
         return similarity_scores
 
 
-def create_dora_workbook():
-    """Create and return a DORA workbook instance"""
-    return DORAWorkbook()
+def create_dora_workbook(csv_path: str = None):
+    """
+    Create and return a DORA workbook instance with flexible domain loading.
+    
+    This factory function provides a convenient way to create DORAWorkbook instances
+    with support for CSV-based domain loading. Users can:
+    - Use the default CSV file for standard domains
+    - Provide a custom CSV path for customized domain sets  
+    - Still rely on hardcoded domains as a fallback
+    
+    The CSV format matches exactly what `export_to_csv()` produces, ensuring consistency
+    and allowing users to export, modify, and re-import domains easily.
+    
+    Usage Examples:
+        workbook = create_dora_workbook()
+        
+        workbook = create_dora_workbook("custom_domains.csv")
+        
+        workbook = create_dora_workbook("test_domains.csv")
+    
+    Args:
+        csv_path: Optional path to CSV file containing DORA domains.
+                 If None, tries to load from default 'dora_domains.csv',
+                 falls back to hardcoded domains if CSV loading fails.
+    
+    Returns:
+        DORAWorkbook: Initialized workbook instance with domains loaded from CSV or hardcoded fallback
+    """
+    return DORAWorkbook(csv_path)
 
 
 if __name__ == "__main__":
@@ -186,4 +438,4 @@ if __name__ == "__main__":
     
     # Export to CSV file
     csv_file = workbook.export_to_csv()
-    print(f"DORA Compliance Workbook exported to {csv_file}") 
+    print(f"DORA Compliance Workbook exported to {csv_file}")          
