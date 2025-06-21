@@ -594,9 +594,78 @@ These specialized models enable more accurate identification of policy areas and
 - **No Policies Found**: Make sure your policy PDFs are in the "policies" folder. The folder will be created automatically on first run, but you need to manually add your PDF files to it before analysis
 - **Irrelevant Results**: The tool automatically screens documents for DORA relevance, but you can adjust the screening logic in the `is_dora_relevant` function if needed
 
+## Testing
+
+The DORA Controls Analyzer includes a comprehensive test suite to verify functionality and ensure reliability. Run these tests to validate your installation and check system health.
+
+### Available Test Scripts
+
+#### 1. Basic Functionality Tests (`test_functionality.py`)
+Tests core analyzer functionality and file structure:
+
+```bash
+python test_functionality.py
+```
+
+**What it tests:**
+- DORAComplianceAnalyzer instantiation
+- DORA domains loading (47 domains)
+- DORA workbook creation
+- Required file presence
+
+**Expected output:**
+```
+✓ All required files present
+✓ DORA domains loaded (47 domains)
+✓ DORA workbook can be created
+✓ DORAComplianceAnalyzer can be instantiated
+✓ All functionality tests passed!
+```
+
+#### 2. Import Validation Tests (`test_imports.py`)
+Validates all module imports work correctly:
+
+```bash
+python test_imports.py
+```
+
+**What it tests:**
+- Core module imports (dora.py, dora_domains.py)
+- Workbook integration imports
+- External dependency imports (spaCy, transformers, etc.)
+
+#### 3. CSV Compatibility Tests (`test_csv_roundtrip.py`)
+Tests CSV export/import functionality for domain loading:
+
+```bash
+python test_csv_roundtrip.py
+```
+
+**What it tests:**
+- CSV export/import round-trip compatibility
+- CSV format consistency and validation
+- Domain data integrity after export/import cycles
+
+### Running All Tests
+
+To run all tests sequentially:
+
+```bash
+python test_imports.py && python test_functionality.py && python test_csv_roundtrip.py
+```
+
+### Test Troubleshooting
+
+- **Import Errors**: Run `pip install -r requirements-cpu.txt` or `requirements-gpu.txt`
+- **Missing spaCy Model**: The setup script automatically downloads required models
+- **File Not Found**: Ensure you're running tests from the project root directory
+- **CSV Test Failures**: Check file permissions and available disk space
+
 ## DORA Compliance Workbook
 
-The DORA Controls Analyzer now includes a structured compliance workbook that categorizes DORA requirements into domains similar to SOC2. This feature:
+The DORA Controls Analyzer includes a structured compliance workbook that categorizes DORA requirements into domains similar to SOC2. This feature supports both hardcoded domains and flexible CSV-based domain loading.
+
+### Key Features
 
 1. **Organizes DORA into Domains**: Breaks down DORA into 8 key domains with specific controls:
    - ICT Risk Management
@@ -616,10 +685,54 @@ The DORA Controls Analyzer now includes a structured compliance workbook that ca
    - Charts visualizing domain compliance
    - Similarity scores for each requirement
 
+4. **Flexible Domain Loading**: Load domains from CSV files or use built-in defaults with automatic fallback.
+
+### CSV-Based Domain Loading
+
+The workbook now supports loading DORA domains from CSV files, providing flexibility for customization while maintaining backward compatibility.
+
+#### Default CSV Loading
+```python
+from dora_domains import create_dora_workbook
+
+# Automatically tries to load from dora_domains.csv, falls back to hardcoded domains
+workbook = create_dora_workbook()
+```
+
+#### Custom CSV File
+```python
+# Load from custom CSV file
+workbook = create_dora_workbook("my_custom_domains.csv")
+
+# Or load domains directly
+from dora_domains import load_domains_from_csv
+domains = load_domains_from_csv("custom_domains.csv")
+```
+
+#### CSV Format Requirements
+Your CSV file must include these columns:
+- `code`: Domain code (e.g., "RM 1.1", "IM 2.3")
+- `article`: DORA article reference (e.g., "Art. 5", "Art. 17")
+- `domain`: Domain category (e.g., "ICT Risk Management")
+- `requirement`: Detailed requirement description
+
+**Example CSV format:**
+```csv
+code,article,domain,requirement
+RM 1.1,Art. 5,ICT Risk Management,Governance and strategy for ICT risk
+IM 1.1,Art. 17,ICT Incident Management,ICT incident management process implementation
+```
+
+#### Error Handling and Fallback
+The system gracefully handles CSV loading errors:
+- **File Not Found**: Falls back to hardcoded domains (47 domains)
+- **Invalid Format**: Validates CSV structure and provides clear error messages
+- **Duplicate Codes**: Prevents duplicate domain codes
+- **Missing Columns**: Ensures all required columns are present
+
 ### Using the DORA Workbook
 
-You can run the workbook analysis using:
-
+#### Python API
 ```python
 from WorkShop.dora_workbook_integration import run_workbook_analysis
 
@@ -630,11 +743,35 @@ report_path = run_workbook_analysis(
 )
 ```
 
-Or from the command line:
-
+#### Command Line
 ```bash
 # Generate a domain-specific compliance report
 python -m WorkShop.dora_workbook_integration
 ```
+
+#### Advanced Usage
+```python
+from dora_domains import DORAWorkbook
+
+# Create workbook with custom CSV
+workbook = DORAWorkbook("my_domains.csv")
+
+# Export current domains to CSV for customization
+workbook.export_to_csv("exported_domains.csv")
+
+# Access domain data
+print(f"Loaded {len(workbook.domains)} domains")
+for domain in workbook.domains[:3]:  # Show first 3
+    print(f"{domain['code']}: {domain['requirement']}")
+```
+
+### Workbook Output
+
+The workbook analysis generates:
+- **Excel Report**: Comprehensive compliance workbook with multiple sheets
+- **Domain Coverage**: Color-coded status by domain
+- **Pivot Tables**: Cross-domain analysis and coverage statistics
+- **Charts**: Visual compliance dashboard
+- **Detailed Mapping**: Policy-to-requirement mappings with similarity scores
 
 The workbook functionality is ideal for compliance teams that need to map DORA requirements to specific controls and track compliance status across domains.
