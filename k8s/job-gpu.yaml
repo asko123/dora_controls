@@ -1,0 +1,55 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: dora-analyzer-gpu
+  namespace: dora-analyzer
+spec:
+  template:
+    metadata:
+      labels:
+        app: dora-analyzer
+        variant: gpu
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: dora-analyzer
+        image: dora-analyzer:gpu-latest
+        imagePullPolicy: IfNotPresent
+        envFrom:
+        - configMapRef:
+            name: dora-config
+        resources:
+          requests:
+            memory: "6Gi"
+            cpu: "2"
+            nvidia.com/gpu: 1
+          limits:
+            memory: "12Gi"
+            cpu: "4"
+            nvidia.com/gpu: 1
+        volumeMounts:
+        - name: policies-volume
+          mountPath: /app/policies
+        - name: output-volume
+          mountPath: /app/analysis_output
+        - name: cache-volume
+          mountPath: /app/.cache
+        - name: dora-legislation
+          mountPath: /app/CELEX_32022R2554_EN_TXT.pdf
+          subPath: CELEX_32022R2554_EN_TXT.pdf
+      volumes:
+      - name: policies-volume
+        persistentVolumeClaim:
+          claimName: dora-policies-pvc
+      - name: output-volume
+        persistentVolumeClaim:
+          claimName: dora-output-pvc
+      - name: cache-volume
+        persistentVolumeClaim:
+          claimName: dora-cache-pvc
+      - name: dora-legislation
+        configMap:
+          name: dora-legislation-config
+      nodeSelector:
+        accelerator: nvidia-tesla-k80
+  backoffLimit: 3
