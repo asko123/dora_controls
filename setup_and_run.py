@@ -261,7 +261,7 @@ class DORASetupRunner:
         logger.info("Starting DORA workbook analysis...")
         
         try:
-            cmd = [sys.executable, "-m", "WorkShop.dora_workbook_integration"]
+            cmd = [sys.executable, "dora_workbook_integration.py"]
             logger.info(f"Running: {' '.join(cmd)}")
             
             # Run with real-time output

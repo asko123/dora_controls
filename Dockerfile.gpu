@@ -57,7 +57,7 @@ USER dora
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-  CMD python test_imports.py || exit 1
+  CMD python test_functionality.py || exit 1
 
 # Default command
 CMD ["python", "setup_and_run.py"]

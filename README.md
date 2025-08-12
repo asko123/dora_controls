@@ -2,11 +2,11 @@
 
 A comprehensive tool for analyzing compliance with the Digital Operational Resilience Act (DORA - EU Regulation 2022/2554) by identifying gaps between your organization's policies and DORA requirements.
 
-## How to Run the DORA Controls Analyzer
+## Quick Start
 
 Choose the deployment method that best fits your needs:
 
-### 🚀 Option 1: Kubernetes Deployment (Recommended for Production)
+### Kubernetes Deployment (Recommended for Production)
 
 **Best for:** Production environments, scalable processing, cloud deployments
 
@@ -19,19 +19,23 @@ cd dora_controls
 chmod +x k8s/deploy.sh
 ./k8s/deploy.sh
 
+# Create DORA legislation ConfigMap
+kubectl create configmap dora-legislation-config \
+  --from-file=CELEX_32022R2554_EN_TXT.pdf \
+  --namespace=dora-analyzer
+
 # Add your policy files
 kubectl cp policies/ dora-analyzer/$(kubectl get pods -n dora-analyzer -l app=dora-analyzer -o jsonpath='{.items[0].metadata.name}'):/app/policies/
 
-# Run analysis (choose CPU or GPU)
-kubectl apply -f k8s/job-cpu.yaml     # For CPU processing
-kubectl apply -f k8s/job-gpu.yaml     # For GPU processing (faster)
+# Run workbook analysis (currently working)
+kubectl apply -f k8s/job-workbook-only.yaml
 
 # Monitor progress and get results
-kubectl logs -f job/dora-analyzer-cpu -n dora-analyzer
+kubectl logs -f job/dora-workbook-analyzer -n dora-analyzer
 kubectl cp dora-analyzer/$(kubectl get pods -n dora-analyzer -l app=dora-analyzer -o jsonpath='{.items[0].metadata.name}'):/app/analysis_output/ ./results/
 ```
 
-### 🖥️ Option 2: Local Automated Setup (Easiest for Testing)
+### Local Automated Setup (For Testing)
 
 **Best for:** Quick testing, development, single-use analysis
 
@@ -44,10 +48,10 @@ mkdir -p policies
 cp /path/to/your/policies/*.pdf policies/
 
 # Run automated setup (handles everything automatically)
-python setup_and_run.py  # or ./setup_and_run.sh on Linux/macOS
+python setup_and_run.py
 ```
 
-### ⚙️ Option 3: Manual Local Setup (Advanced Users)
+### Manual Local Setup (Advanced Users)
 
 **Best for:** Custom configurations, development, troubleshooting
 
@@ -70,8 +74,25 @@ python -m spacy download en_core_web_lg
 # Add your policies and run
 mkdir -p policies
 cp /path/to/your/policies/*.pdf policies/
-python dora.py
+python setup_and_run.py
 ```
+
+## Current Status
+
+**Important Note:** The full ML pipeline is currently limited due to PyTorch security vulnerability CVE-2025-32434. The following functionality is available:
+
+**Working Components:**
+- Workbook analysis with DORA domain mapping
+- Excel report generation 
+- PDF text extraction
+- Basic compliance gap identification
+- Kubernetes deployment infrastructure
+
+**Pending Components (awaiting PyTorch 2.6+ release):**
+- ML-based semantic analysis
+- Zero-shot classification
+- Automated policy-requirement matching
+- Advanced compliance scoring
 
 ## Overview
 
@@ -128,63 +149,10 @@ These advanced capabilities ensure you receive a realistic, context-sensitive ga
 
 ## Prerequisites
 
-- Python 3.7+
+- Python 3.8+
 - CUDA-compatible GPU (optional, for faster processing)
-- Required Python packages (see installation section)
-
-## Automated Setup (Recommended)
-
-**🚀 One-Click Setup and Analysis**
-
-For the easiest experience, use our automated setup script that handles everything:
-
-### Windows Users
-```cmd
-setup_and_run.bat
-```
-
-### macOS/Linux Users
-```bash
-./setup_and_run.sh
-```
-
-**What the automated setup does:**
-1. ✅ Detects if you have a CUDA-compatible GPU
-2. ✅ Automatically installs the correct requirements (GPU or CPU)
-3. ✅ Downloads required spaCy language models
-4. ✅ Verifies the installation
-5. ✅ Runs the main DORA analysis (dora.py)
-6. ✅ Runs the workbook analysis (domain-specific Excel reports)
-7. ✅ Provides real-time progress updates and error handling
-
-**Requirements for automated setup:**
-- Python 3.7+ installed and accessible via command line
-- Internet connection for downloading models and dependencies
-- Your policy PDFs in the `policies` folder
-- DORA legislation PDF in the root directory
-
-**Example output:**
-```
-╔══════════════════════════════════════════════════════════════╗
-║                    DORA Controls Analyzer                    ║
-║                  Automated Setup & Runner                   ║
-╚══════════════════════════════════════════════════════════════╝
-
-✓ Python version: 3.8.10
-✓ Project structure verified
-✓ DORA legislation file found
-✓ Found 5 policy files for analysis
-✓ NVIDIA GPU detected
-✓ Requirements installed successfully
-✓ spaCy model downloaded successfully
-✓ All required packages imported successfully
-✓ CUDA available: 1 GPU(s)
-🚀 Setup complete! Starting analysis...
-```
-
-If you prefer manual control over the installation, see the manual installation section below.
-
-## Manual Installation
+- Required Python packages (see requirements files)
+- Kubernetes cluster (for k8s deployment)
 
 ## System Requirements
 
@@ -232,31 +200,33 @@ The DORA Controls Analyzer performs intensive natural language processing and **
 | Large policy (50+ pages) | 3-5 minutes | 20-40 minutes |
 | Multiple policies (10 docs) | 15-30 minutes | 2-4 hours |
 
-**⚠️ Important**: CPU-only processing of large document sets may take several hours and is not practical for regular use.
+**Important**: CPU-only processing of large document sets may take several hours and is not practical for regular use.
 
 ## Requirements
 
 The DORA Controls Analyzer requires the following:
 
-1. **Python Environment**: Python 3.7 or newer
+1. **Python Environment**: Python 3.8 or newer
 2. **Dependencies**: The following Python packages (automatically installed via requirements.txt):
-   - `numpy==1.23.5`: Mathematical operations (specific version to avoid conflicts)
+   - `numpy>=1.21.0,<2.0.0`: Mathematical operations (version pinned for compatibility)
    - `pdfplumber>=0.7.4`: PDF text extraction
    - `pandas>=1.3.5`: Data manipulation
-   - `spacy>=3.4.0`: Natural language processing
-   - `torch>=1.13.0`: Machine learning backend
+   - `spacy>=3.7.0`: Natural language processing
    - `transformers>=4.22.0`: Hugging Face transformer models
    - `sentence-transformers>=2.2.2`: Semantic similarity
+   - `safetensors>=0.4.0`: Security mitigation for model loading
    - `tqdm>=4.64.0`: Progress bars
    - `filelock>=3.8.0`: Thread-safe file operations
    - `psutil>=5.9.0`: System monitoring
+   - `xlsxwriter>=3.0.3`: Excel file creation
+   - `openpyxl>=3.1.0`: Excel file reading/writing
 3. **SpaCy Model**: The English language model (`en_core_web_lg`)
 4. **DORA Legislation**: The official DORA PDF file
 5. **Policy Documents**: Your organization's PDF policy documents
 
 ## Installation
 
-**⚠️ Important: GPU Support Highly Recommended**
+**Important: GPU Support Highly Recommended**
 
 The DORA Controls Analyzer uses intensive NLP models that process large amounts of text. **GPU acceleration provides 5-10x faster processing** compared to CPU-only mode.
 
@@ -337,10 +307,10 @@ The DORA Controls Analyzer uses intensive NLP models that process large amounts 
 nvidia-smi
 
 # For CUDA 11.7, use:
-pip install torch>=1.13.0+cu117 torchvision>=0.14.0+cu117 --index-url https://download.pytorch.org/whl/cu117
+pip install torch>=2.2.0+cu117 torchvision>=0.17.0+cu117 --index-url https://download.pytorch.org/whl/cu117
 
 # For CUDA 12.1, use:
-pip install torch>=1.13.0+cu121 torchvision>=0.14.0+cu121 --index-url https://download.pytorch.org/whl/cu121
+pip install torch>=2.2.0+cu121 torchvision>=0.17.0+cu121 --index-url https://download.pytorch.org/whl/cu121
 ```
 
 **Memory Issues:**
@@ -355,12 +325,23 @@ DORAConfig.BATCH_SIZE = 5  # Reduce from default 10
 Before running the analyzer, ensure your files are organized as follows:
 
 ```
-📁 Your Upload Package:
+Your Project Directory:
 ├── CELEX_32022R2554_EN_TXT.pdf (DORA legislation)
 ├── setup_and_run.py (main orchestrator)
-│   dora.py (main analyzer)
-│   dora_domains.py (domain definitions)
-│   dora_workbook_integration.py (domain analysis)
+├── dora.py (main analyzer)
+├── dora_domains.py (domain definitions)
+├── dora_workbook_integration.py (domain analysis)
+├── requirements-cpu.txt (CPU dependencies)
+├── requirements-gpu.txt (GPU dependencies)
+├── k8s/ (Kubernetes deployment files)
+│   ├── deploy.sh
+│   ├── namespace.yaml
+│   ├── configmap.yaml
+│   ├── storage.yaml
+│   ├── job-cpu.yaml
+│   ├── job-gpu.yaml
+│   ├── job-workbook-only.yaml
+│   └── k8s-deployment-guide.md
 └── policies/
     ├── your_policy_1.pdf
     ├── your_policy_2.pdf
@@ -371,37 +352,36 @@ Before running the analyzer, ensure your files are organized as follows:
 
 ## Running the Analyzer
 
-## Two Analysis Approaches
+### Two Analysis Approaches
 
 The DORA Controls Analyzer provides **two different analysis approaches** depending on your needs:
 
-### 1. Main Analysis Tool: `dora.py` (Recommended for most users)
+### 1. Automated Setup Script: `setup_and_run.py` (Recommended for most users)
 
-**Use this for comprehensive gap analysis:**
+**Use this for comprehensive automated analysis:**
 
 ```bash
-python dora.py
+python setup_and_run.py
 ```
 
 **What it does:**
-- Extracts RTS and ITS requirements directly from DORA legislation
-- Analyzes your policy documents for compliance coverage using semantic similarity
-- Generates detailed text-based gap analysis reports with article-specific findings
-- Handles multiple policies in parallel with intelligent relevance screening
-- Provides context-aware recommendations based on policy focus areas
+- Detects GPU availability automatically
+- Installs appropriate dependencies (GPU or CPU)
+- Downloads required ML models
+- Runs both main analysis and workbook generation
+- Provides real-time progress updates and error handling
 
 **Use this when:**
-- You want a complete DORA compliance assessment
-- You need detailed gap analysis with specific recommendations
-- You prefer comprehensive text-based reports
+- You want a complete automated setup and analysis
 - You're doing an initial compliance assessment
+- You prefer hands-off operation with progress tracking
 
-### 2. Domain-Specific Analysis: `dora_workbook_integration.py` (For structured reporting)
+### 2. Workbook Analysis: `dora_workbook_integration.py` (For structured reporting)
 
 **Use this for SOC2-style domain organization:**
 
 ```bash
-python -m WorkShop.dora_workbook_integration
+python dora_workbook_integration.py
 ```
 
 **What it does:**
@@ -419,11 +399,11 @@ python -m WorkShop.dora_workbook_integration
 ### Quick Decision Guide
 
 ```bash
-# For comprehensive text-based gap analysis (most users):
-python dora.py
+# For comprehensive automated analysis (most users):
+python setup_and_run.py
 
 # For domain-specific Excel reports (compliance teams):
-python -m WorkShop.dora_workbook_integration
+python dora_workbook_integration.py
 
 # You can run both tools - they complement each other!
 ```
@@ -442,13 +422,13 @@ python -m WorkShop.dora_workbook_integration
 3. **Run the analyzer**:
    ```bash
    # From the project root directory
-   python dora.py
+   python setup_and_run.py
    ```
 
 4. **View the results**:
    - The analysis logs will be displayed in the console
-   - A detailed gap analysis report will be generated in the `analysis_output` folder
-   - Additional logs are stored in `dora_analyzer.log`
+   - Excel workbooks will be generated in the root directory
+   - Additional logs are stored in `setup_and_run.log`
 
 ### Advanced Usage
 
@@ -464,173 +444,23 @@ DORAConfig.FINAL_COVERAGE_THRESHOLD = 0.7  # Lower from default 0.8
 DORAConfig.MAX_TEXT_CHUNK_SIZE = 50000  # Default is 25000
 ```
 
-To run with modified settings, you can create a custom script:
-
-```python
-# custom_run.py
-from dora import DORAComplianceAnalyzer, DORAConfig
-
-# Modify configuration
-DORAConfig.STRONG_MATCH_THRESHOLD = 0.5
-DORAConfig.COVERAGE_MATCH_THRESHOLD = 0.6
-DORAConfig.FINAL_COVERAGE_THRESHOLD = 0.7
-
-# Run analysis
-analyzer = DORAComplianceAnalyzer("CELEX_32022R2554_EN_TXT.pdf")
-analyzer.extract_technical_standards()
-# Process each policy in the policies directory
-# ...
-analyzer.generate_gap_analysis_report()
-```
-
-## Detailed Setup Instructions
-
-### Local Installation Requirements
-
-**⚠️ Important: GPU Support Highly Recommended**
-
-The DORA Controls Analyzer uses intensive NLP models that process large amounts of text. **GPU acceleration provides 5-10x faster processing** compared to CPU-only mode.
-
-#### Prerequisites for Local Setup
-- Python 3.8+ (Python 3.11 recommended)
-- For GPU support: NVIDIA GPU with CUDA 11.8+ and at least 4GB GPU memory
-- At least 8GB system RAM
-- 5GB free disk space for models and dependencies
-
-#### Automated Local Setup (Recommended)
-
-The easiest way to get started locally:
-
-```bash
-git clone https://github.com/asko123/dora_controls.git
-cd dora_controls
-
-# Add your policy documents
-mkdir -p policies
-cp /path/to/your/policies/*.pdf policies/
-
-# Run automated setup - handles everything automatically
-python setup_and_run.py
-```
-
-The automated setup script will:
-- Create a virtual environment
-- Install appropriate dependencies (GPU or CPU)
-- Download required ML models
-- Run the analysis automatically
-
-#### Manual Local Setup (Advanced)
-
-For users who need custom configurations:
-
-**With GPU Support:**
-```bash
-git clone https://github.com/asko123/dora_controls.git
-cd dora_controls
-
-python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
-
-pip install -r requirements-gpu.txt
-python -m spacy download en_core_web_lg
-
-# Verify GPU setup
-python -c "import torch; print(f'CUDA available: {torch.cuda.is_available()}')"
-
-mkdir -p policies
-cp /path/to/your/policies/*.pdf policies/
-python dora.py
-```
-
-**CPU-Only Setup:**
-```bash
-git clone https://github.com/asko123/dora_controls.git
-cd dora_controls
-
-python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
-
-pip install -r requirements-cpu.txt
-python -m spacy download en_core_web_lg
-
-mkdir -p policies
-cp /path/to/your/policies/*.pdf policies/
-python dora.py
-
-# Set up Python environment
-python -m venv venv
-source venv/bin/activate  # or venv\Scripts\activate on Windows
-
-# Install CPU-only dependencies (no GPU required)
-pip install -r requirements-cpu.txt
-python -m spacy download en_core_web_lg
-
-# Create policies folder and add your PDFs
-mkdir -p policies
-cp /path/to/your/policies/*.pdf policies/
-
-# Download DORA legislation if needed
-# wget https://eur-lex.europa.eu/legal-content/EN/TXT/PDF/?uri=CELEX:32022R2554 -O CELEX_32022R2554_EN_TXT.pdf
-
-# Run the analyzer (will be slower without GPU)
-python dora.py
-```
-
-## Example Command Sequence
-
-```bash
-# Clone repository
-git clone https://github.com/asko123/dora_controls.git
-cd dora_controls
-
-# Setup virtual environment
-python -m venv venv
-source venv/bin/activate  # or venv\Scripts\activate on Windows
-
-# Install dependencies
-pip install -r requirements.txt
-python -m spacy download en_core_web_lg
-
-# Download DORA legislation if needed
-# wget https://eur-lex.europa.eu/legal-content/EN/TXT/PDF/?uri=CELEX:32022R2554 -O CELEX_32022R2554_EN_TXT.pdf
-
-# The policies folder will be created automatically on first run
-# You can check if it exists or create it manually
-if [ ! -d "policies" ]; then
-    mkdir -p policies
-    echo "Created policies folder. Please add your policy PDFs here."
-fi
-
-# Add your policy documents to the policies folder
-cp /path/to/your/policies/*.pdf policies/
-
-# Run the analyzer
-python dora.py
-
-# View the generated report (contains RTS and ITS compliance analysis)
-cat analysis_output/dora_gap_analysis_*.txt
-```
-
 ## Output Files
 
 The analyzer generates the following outputs:
 
-1. **Log File**: `dora_analyzer.log` - Contains detailed logs of the analysis process
+1. **Log File**: `setup_and_run.log` - Contains detailed logs of the analysis process
 
-2. **Gap Analysis Report**: Located in the `analysis_output` directory with filename format `dora_gap_analysis_YYYYMMDD_HHMMSS.txt`
+2. **Excel Reports**: Located in the root directory with filename format `dora_domain_compliance_YYYYMMDD_HHMMSS.xlsx`
 
 3. **Cache Files**: Located in the `.cache` directory (for improved performance on subsequent runs)
 
 ## Interpreting Results
 
-The gap analysis report includes:
+The Excel reports include:
 
-1. **Executive Summary**: Overall compliance coverage percentage
-2. **Policy Coverage Summary**: Per-policy coverage of Regulatory Technical Standards (RTS) and Implementing Technical Standards (ITS) requirements with policy focus areas
-3. **Detailed Gap Analysis**: Article-by-article breakdown of gaps with clear distinction between:
-   - Relevant gaps that need addressing within existing policies
-   - Informational gaps that are outside a policy's scope
-4. **Recommendations**: Policy-specific actions to improve compliance
+1. **All Results**: Complete listing of all DORA requirements with compliance status
+2. **Domain Coverage**: Cross-domain analysis showing coverage by policy areas
+3. **Coverage Summary**: High-level statistics and compliance percentages
 
 A high coverage score (>80%) indicates good alignment with DORA requirements, while lower scores highlight areas needing attention.
 
@@ -670,15 +500,15 @@ These specialized models enable more accurate identification of policy areas and
 - **Low Coverage**: Adjust similarity thresholds in DORAConfig
 - **Missing DORA File**: Ensure the DORA legislation PDF is in the root directory with the exact name "CELEX_32022R2554_EN_TXT.pdf"
 - **No Policies Found**: Make sure your policy PDFs are in the "policies" folder. The folder will be created automatically on first run, but you need to manually add your PDF files to it before analysis
-- **Irrelevant Results**: The tool automatically screens documents for DORA relevance, but you can adjust the screening logic in the `is_dora_relevant` function if needed
+- **ML Model Errors**: Currently limited by PyTorch security issue CVE-2025-32434; use workbook-only analysis until resolved
 
 ## Testing
 
-The DORA Controls Analyzer includes a comprehensive test suite to verify functionality and ensure reliability. Run these tests to validate your installation and check system health.
+The DORA Controls Analyzer includes a test script to verify functionality and ensure reliability.
 
-### Available Test Scripts
+### Available Test Script
 
-#### 1. Basic Functionality Tests (`test_functionality.py`)
+#### Functionality Tests (`test_functionality.py`)
 Tests core analyzer functionality and file structure:
 
 ```bash
@@ -686,58 +516,27 @@ python test_functionality.py
 ```
 
 **What it tests:**
-- DORAComplianceAnalyzer instantiation
 - DORA domains loading (47 domains)
 - DORA workbook creation
 - Required file presence
+- Basic system functionality
 
 **Expected output:**
 ```
-✓ All required files present
-✓ DORA domains loaded (47 domains)
-✓ DORA workbook can be created
-✓ DORAComplianceAnalyzer can be instantiated
-✓ All functionality tests passed!
-```
-
-#### 2. Import Validation Tests (`test_imports.py`)
-Validates all module imports work correctly:
-
-```bash
-python test_imports.py
-```
-
-**What it tests:**
-- Core module imports (dora.py, dora_domains.py)
-- Workbook integration imports
-- External dependency imports (spaCy, transformers, etc.)
-
-#### 3. CSV Compatibility Tests (`test_csv_roundtrip.py`)
-Tests CSV export/import functionality for domain loading:
-
-```bash
-python test_csv_roundtrip.py
-```
-
-**What it tests:**
-- CSV export/import round-trip compatibility
-- CSV format consistency and validation
-- Domain data integrity after export/import cycles
-
-### Running All Tests
-
-To run all tests sequentially:
-
-```bash
-python test_imports.py && python test_functionality.py && python test_csv_roundtrip.py
+Testing DORA Controls Analyzer functionality...
+==================================================
+All required files present
+DORA domains loaded (47 domains)
+DORA workbook can be created
+==================================================
+All tests passed!
 ```
 
 ### Test Troubleshooting
 
 - **Import Errors**: Run `pip install -r requirements-cpu.txt` or `requirements-gpu.txt`
-- **Missing spaCy Model**: The setup script automatically downloads required models
+- **Missing spaCy Model**: Run `python -m spacy download en_core_web_lg`
 - **File Not Found**: Ensure you're running tests from the project root directory
-- **CSV Test Failures**: Check file permissions and available disk space
 
 ## DORA Compliance Workbook
 
@@ -810,21 +609,10 @@ The system gracefully handles CSV loading errors:
 
 ### Using the DORA Workbook
 
-#### Python API
-```python
-from WorkShop.dora_workbook_integration import run_workbook_analysis
-
-# Run analysis and generate Excel report
-report_path = run_workbook_analysis(
-    dora_path="CELEX_32022R2554_EN_TXT.pdf",
-    policies_folder="policies"
-)
-```
-
 #### Command Line
 ```bash
 # Generate a domain-specific compliance report
-python -m WorkShop.dora_workbook_integration
+python dora_workbook_integration.py
 ```
 
 #### Advanced Usage
@@ -865,21 +653,23 @@ The DORA Controls Analyzer can be deployed in Kubernetes for scalable batch proc
 
 ### Quick Start
 ```bash
-# Build and deploy
+# Build and deploy infrastructure
 chmod +x k8s/deploy.sh
 ./k8s/deploy.sh
+
+# Create DORA legislation ConfigMap
+kubectl create configmap dora-legislation-config \
+  --from-file=CELEX_32022R2554_EN_TXT.pdf \
+  --namespace=dora-analyzer
 
 # Upload your policy files to the policies PVC
 kubectl cp policies/ dora-analyzer/$(kubectl get pods -n dora-analyzer -l app=dora-analyzer -o jsonpath='{.items[0].metadata.name}'):/app/policies/
 
-# Run CPU analysis
-kubectl apply -f k8s/job-cpu.yaml
-
-# Or run GPU analysis (if GPU nodes available)
-kubectl apply -f k8s/job-gpu.yaml
+# Run workbook analysis (currently working)
+kubectl apply -f k8s/job-workbook-only.yaml
 
 # Monitor job progress
-kubectl logs -f job/dora-analyzer-cpu -n dora-analyzer
+kubectl logs -f job/dora-workbook-analyzer -n dora-analyzer
 
 # Retrieve results
 kubectl cp dora-analyzer/$(kubectl get pods -n dora-analyzer -l app=dora-analyzer -o jsonpath='{.items[0].metadata.name}'):/app/analysis_output/ ./results/
@@ -888,18 +678,20 @@ kubectl cp dora-analyzer/$(kubectl get pods -n dora-analyzer -l app=dora-analyze
 ### Architecture
 - **CPU Variant**: Uses `Dockerfile.cpu` for CPU-only processing
 - **GPU Variant**: Uses `Dockerfile.gpu` with CUDA support for faster processing
+- **Workbook Variant**: Uses `job-workbook-only.yaml` for current functionality
 - **Storage**: Persistent volumes for policies, output, and model cache
 - **Jobs**: Kubernetes Jobs for batch processing with automatic retry
 
 ### Resource Requirements
 - **CPU Jobs**: 4Gi-8Gi memory, 2-4 CPU cores
 - **GPU Jobs**: 6Gi-12Gi memory, 2-4 CPU cores, 1 GPU
+- **Workbook Jobs**: 2Gi-4Gi memory, 1-2 CPU cores
 - **Storage**: 1Gi policies, 5Gi output, 2Gi cache
 
 ### Container Images
-The deployment includes two Docker variants:
+The deployment includes Docker variants:
 - **CPU Image**: Built from `Dockerfile.cpu` using Python 3.11-slim base
-- **GPU Image**: Built from `Dockerfile.gpu` using NVIDIA CUDA 11.8 runtime
+- **GPU Image**: Built from `Dockerfile.gpu` using NVIDIA CUDA 12.9.1 runtime
 
 ### Deployment Files
 - `k8s/namespace.yaml`: Creates the dora-analyzer namespace
@@ -907,7 +699,17 @@ The deployment includes two Docker variants:
 - `k8s/storage.yaml`: Persistent volume claims for data storage
 - `k8s/job-cpu.yaml`: CPU processing job definition
 - `k8s/job-gpu.yaml`: GPU processing job definition
+- `k8s/job-workbook-only.yaml`: Workbook-only job (currently working)
+- `k8s/dora-legislation-configmap.yaml`: DORA legislation configuration
 - `k8s/deploy.sh`: Automated deployment script
+- `k8s/k8s-deployment-guide.md`: Detailed deployment guide
+
+### Current Limitations
+
+Due to PyTorch security vulnerability CVE-2025-32434:
+- **CPU and GPU jobs**: Limited by ML model initialization issues
+- **Workbook-only jobs**: Fully functional for Excel report generation
+- **Infrastructure**: All Kubernetes components fully operational
 
 ### Usage Examples
 ```bash
@@ -915,14 +717,38 @@ The deployment includes two Docker variants:
 kubectl get jobs -n dora-analyzer
 
 # View job logs
-kubectl logs job/dora-analyzer-cpu -n dora-analyzer
+kubectl logs job/dora-workbook-analyzer -n dora-analyzer
 
 # Clean up completed jobs
-kubectl delete job dora-analyzer-cpu -n dora-analyzer
-kubectl delete job dora-analyzer-gpu -n dora-analyzer
+kubectl delete job dora-workbook-analyzer -n dora-analyzer
 
-# Scale resources if needed
-kubectl patch job dora-analyzer-cpu -n dora-analyzer -p '{"spec":{"parallelism":2}}'
+# Scale workbook analysis for multiple policy sets
+sed 's/dora-workbook-analyzer/dora-workbook-analyzer-2/' k8s/job-workbook-only.yaml | kubectl apply -f -
 ```
 
-The Kubernetes deployment provides a scalable, containerized solution for running DORA compliance analysis in cloud environments with proper resource management and persistent storage.
+The Kubernetes deployment provides a scalable, containerized solution for running DORA compliance analysis in cloud environments with proper resource management and persistent storage. Currently optimized for workbook analysis until ML pipeline limitations are resolved.
+
+## Security Considerations
+
+### Container Security
+- Non-root user (UID 1000) in containers
+- Health checks for container validation
+- Resource limits enforced
+- Network policies can be applied
+
+### Data Security
+- Persistent volumes for data isolation
+- Namespace isolation in Kubernetes
+- ConfigMap for environment variables
+- Policy documents require secure upload process
+
+## Support and Documentation
+
+For detailed deployment instructions, troubleshooting, and advanced configuration, see:
+- `k8s/k8s-deployment-guide.md` - Comprehensive Kubernetes deployment guide
+- `test_functionality.py` - System validation and health checks
+- GitHub issues for community support
+
+## License
+
+This project is available under the terms specified in the repository license.

@@ -1,0 +1,49 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: dora-workbook-analyzer
+  namespace: dora-analyzer
+spec:
+  template:
+    metadata:
+      labels:
+        app: dora-analyzer
+        variant: workbook-only
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: dora-workbook-analyzer
+        image: dora-analyzer:cpu-latest
+        imagePullPolicy: IfNotPresent
+        command: ["python", "dora_workbook_integration.py"]
+        envFrom:
+        - configMapRef:
+            name: dora-config
+        env:
+        - name: SKIP_ML_MODELS
+          value: "true"
+        resources:
+          requests:
+            memory: "2Gi"
+            cpu: "1"
+          limits:
+            memory: "4Gi"
+            cpu: "2"
+        volumeMounts:
+        - name: policies-volume
+          mountPath: /app/policies
+        - name: output-volume
+          mountPath: /app/analysis_output
+        - name: cache-volume
+          mountPath: /app/.cache
+      volumes:
+      - name: policies-volume
+        persistentVolumeClaim:
+          claimName: dora-policies-pvc
+      - name: output-volume
+        persistentVolumeClaim:
+          claimName: dora-output-pvc
+      - name: cache-volume
+        persistentVolumeClaim:
+          claimName: dora-cache-pvc
+  backoffLimit: 3

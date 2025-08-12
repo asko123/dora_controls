@@ -3,20 +3,29 @@
 # For CUDA-compatible NVIDIA GPUs (RECOMMENDED for best performance)
 
 # Core dependencies
-numpy>=1.26.2
+# NumPy version pinned to avoid ABI mismatch with PyTorch/spaCy
+numpy>=1.21.0,<2.0.0
 pdfplumber>=0.7.4
 pandas>=1.3.5
-spacy>=3.4.0
+spacy>=3.7.0
 
 # NLP and ML libraries (will use GPU automatically)
 transformers>=4.22.0
 sentence-transformers>=2.2.2
+safetensors>=0.4.0
 
 # Utility libraries
 tqdm>=4.64.0
 filelock>=3.8.0
 psutil>=5.9.0
 xlsxwriter>=3.0.3
+openpyxl>=3.1.0
+
+# PyTorch GPU version requirements  
+torch>=2.2.0  # Note: PyTorch 2.6+ not yet available, using latest stable
+torchvision>=0.17.0
+torchaudio>=2.2.0
+# Note: CVE-2025-32434 mitigation - models should use safetensors when available
 
 # GPU monitoring (optional)
 nvidia-ml-py3>=7.352.0   

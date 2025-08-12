@@ -9,6 +9,7 @@ echo "Applying Kubernetes manifests..."
 kubectl apply -f k8s/namespace.yaml
 kubectl apply -f k8s/configmap.yaml
 kubectl apply -f k8s/storage.yaml
+kubectl apply -f k8s/dora-legislation-configmap.yaml
 
 echo "Waiting for PVCs to be bound..."
 kubectl wait --for=condition=Bound pvc/dora-policies-pvc -n dora-analyzer --timeout=60s

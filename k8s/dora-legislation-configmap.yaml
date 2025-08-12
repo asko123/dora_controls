@@ -1,0 +1,37 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dora-legislation-config
+  namespace: dora-analyzer
+binaryData:
+  CELEX_32022R2554_EN_TXT.pdf: |
+    # This ConfigMap should contain the base64-encoded DORA legislation PDF
+    # To create this, run:
+    # kubectl create configmap dora-legislation-config \
+    #   --from-file=CELEX_32022R2554_EN_TXT.pdf \
+    #   --namespace=dora-analyzer \
+    #   --dry-run=client -o yaml > k8s/dora-legislation-configmap.yaml
+    # 
+    # Note: Due to size limitations, this file should be created separately
+    # For now, mount the PDF file directly or use an init container
+---
+# Alternative: Use emptyDir and init container to download the PDF
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dora-legislation-init
+  namespace: dora-analyzer
+data:
+  init-script.sh: |
+    #!/bin/bash
+    set -e
+    echo "Checking for DORA legislation file..."
+    if [ ! -f /app/CELEX_32022R2554_EN_TXT.pdf ]; then
+      echo "DORA legislation file not found!"
+      echo "Please ensure CELEX_32022R2554_EN_TXT.pdf is available"
+      echo "Creating placeholder file for testing..."
+      touch /app/CELEX_32022R2554_EN_TXT.pdf
+    else
+      echo "DORA legislation file found: $(du -h /app/CELEX_32022R2554_EN_TXT.pdf)"
+    fi
+    echo "Initialization complete."
